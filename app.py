@@ -270,34 +270,9 @@ def show_probabilities(probabilities: dict | None, title: str):
     st.bar_chart(probs.set_index("clasă"))
 
 
-def metrics_table(section: str) -> pd.DataFrame:
-    baseline = report[section]["baseline"]
-    model = report[section]["model"]
-    rows = []
-    for metric in ["accuracy", "balanced_accuracy", "macro_f1", "weighted_f1"]:
-        rows.append(
-            {
-                "metrică": metric,
-                "baseline": baseline[metric],
-                "model final": model[metric],
-                "îmbunătățire": model[metric] - baseline[metric],
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def confusion_dataframe(section: str) -> pd.DataFrame:
-    cm = report[section]["confusion_matrix"]
-    return pd.DataFrame(cm["matrix"], index=cm["labels"], columns=cm["labels"])
-
-
 tabs = st.tabs([
-    "🎓 Exerciții și feedback",
-    "🧩 Cum funcționează modelul",
-    "📊 Date și rezultate",
-    "🏆 Cum am construit proiectul",
-    "❓ Răspunsuri pentru evaluare",
-    "⚖️ Etică și limite",
+    "🏠 Acasă",
+    "🤖 Tutor AI",
 ])
 
 with tabs[0]:
@@ -391,7 +366,7 @@ with tabs[0]:
         show_probabilities(diff_pred.get("probabilities"), "Probabilități dificultate")
 
 with tabs[1]:
-    st.header("Cele două servicii ML - distincte și complementare")
+    st.header("Tutor AI - exerciții, indicii și recomandări")
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("1) Date structurate → dificultate")
@@ -426,92 +401,3 @@ with tabs[1]:
         "Modelul pe text etichetează probleme noi după conținut. Modelul pe date structurate estimează nivelul de dificultate și susține recomandarea adaptivă. Dacă eliminăm modelul text, nu putem eticheta probleme noi; dacă eliminăm modelul structurat, nu putem controla progresia dificultății în traseul elevului."
     )
 
-with tabs[2]:
-    st.header("Evaluare, EDA, robustețe")
-    st.markdown("### Dataset")
-    ds = report["dataset"]
-    st.write(ds["dataset_decision"])
-    dcols = st.columns(4)
-    dcols[0].metric("Rânduri total", ds["rows_total"])
-    dcols[1].metric("Rânduri etichetate", ds["rows_with_difficulty_and_topic"])
-    dcols[2].metric("Duplicate exacte", ds["exact_duplicate_problem_rows"])
-    dcols[3].metric("Mediană cuvinte/problemă", f"{ds['problem_length_words']['median']:.0f}")
-
-    st.subheader("Distribuția domeniilor")
-    domain_df = pd.DataFrame(ds["domain_distribution"].items(), columns=["Domeniu", "număr"]).sort_values("număr", ascending=False)
-    st.dataframe(domain_df, use_container_width=True, hide_index=True)
-    st.bar_chart(domain_df.set_index("Domeniu"))
-
-    st.subheader("Distribuția dificultății")
-    diff_df = pd.DataFrame(ds["difficulty_distribution"].items(), columns=["Dificultate", "număr"]).sort_values("Dificultate")
-    st.dataframe(diff_df, use_container_width=True, hide_index=True)
-    st.bar_chart(diff_df.set_index("Dificultate"))
-
-    st.markdown("### Model structurat")
-    st.dataframe(metrics_table("structured_model"), use_container_width=True, hide_index=True)
-    st.write("Best params:", report["structured_model"]["best_params"])
-    st.write("Confusion matrix")
-    st.dataframe(confusion_dataframe("structured_model"), use_container_width=True)
-    with st.expander("Erori reprezentative - model structurat"):
-        st.json(report["structured_model"]["sample_errors"])
-
-    st.markdown("### Model nestructurat")
-    st.dataframe(metrics_table("unstructured_model"), use_container_width=True, hide_index=True)
-    st.write("Best params:", report["unstructured_model"]["best_params"])
-    st.write("Confusion matrix")
-    st.dataframe(confusion_dataframe("unstructured_model"), use_container_width=True)
-    with st.expander("Erori reprezentative - model text"):
-        st.json(report["unstructured_model"]["sample_errors"])
-
-with tabs[3]:
-    st.header("Strategie pentru punctaj maxim")
-    st.write("Am transformat criteriile din grilă în funcții demonstrabile, nu doar afirmații în README.")
-    strategy = pd.DataFrame(
-        [
-            ["Problema și relevanța", "Elevii primesc ghidare adaptată, nu doar răspunsuri", "tab Tutor demo + Q&A"],
-            ["Arhitectura soluției ML", "două servicii reale: structurat + text", "tab Cele 2 servicii ML"],
-            ["Date structurate", "EDA, curățare, target dificultate, lipsuri raportate", "tab Evaluare & EDA"],
-            ["Model structurat", "RandomForest + preprocessing + inferență live", "dificultate estimată"],
-            ["Robustețe structurat", "baseline, GridSearchCV, StratifiedKFold, metrici calculate", "metric table + confusion matrix"],
-            ["Date nestructurate", "textul problemelor, target domeniu, lungimi/etichete", "EDA + demo text"],
-            ["Model nestructurat", "TF-IDF + ComplementNB, inferență live", "clasificator domeniu"],
-            ["Protocol critic", "split stratificat, duplicate reduse, erori concrete", "sample_errors în raport"],
-            ["Etică", "anonimizare, limite, no full answer by default", "tab Etică"],
-            ["Aplicație", "Streamlit rulează local și folosește ambele modele", "app.py + README"],
-        ],
-        columns=["Criteriu", "Ce demonstrăm", "Unde se vede"],
-    )
-    st.dataframe(strategy, use_container_width=True, hide_index=True)
-
-    st.subheader("Lecții din evaluarea proiectului vechi")
-    st.warning(
-        "Versiunea veche DidactAI a pierdut masiv fiindcă serviciile ML erau euristici hardcodate, metricele erau fabricate, iar evaluarea/etica erau absente. Acest MVP repară exact acele puncte: modele antrenate, rapoarte calculate, baseline, CV, erori, aplicație reproductibilă."
-    )
-
-with tabs[4]:
-    st.header("Răspunsuri pregătite pentru întrebările juriului")
-    qa_path = ROOT / "docs" / "competition_QA.md"
-    if qa_path.exists():
-        st.markdown(qa_path.read_text(encoding="utf-8"))
-    else:
-        st.info("Fișierul docs/competition_QA.md nu a fost găsit.")
-
-with tabs[5]:
-    st.header("Etică, impact și limitări")
-    st.markdown(
-        """
-        **Date.** Setul nu conține date personale ale elevilor; sunt exerciții, pași de rezolvare, răspunsuri, teme și dificultăți. Pentru istoricul elevului, demo-ul folosește doar un profil local în sesiunea Streamlit.
-
-        **Bias.** Datasetul este mic și dezechilibrat: unele domenii/teme au mai multe exerciții decât altele. În modelare folosim macro-F1/balanced accuracy, class_weight sau algoritmi robuști la dezechilibru și raportăm explicit distribuțiile.
-
-        **Utilizare responsabilă.** Tutorul nu afișează soluția completă implicit. Oferă indicii graduale și întrebări metacognitive, pentru a reduce dependența de răspunsuri.
-
-        **Limitări.** Verificarea răspunsului este un checker transparent, nu un CAS matematic complet. Pentru producție trebuie adăugat un evaluator simbolic, mai multe date validate de profesori și teste cu elevi reali anonimizate.
-
-        **Scenarii nesigure.** Predicția poate fi nesigură când problema este foarte scurtă, are desen lipsă, folosește notație ambiguă sau aparține unei teme rare în dataset.
-        """
-    )
-    st.subheader("Ce am îmbunătăți prima dată")
-    st.write(
-        "1) colectare de date reale anonimizate de interacțiune elev-exercițiu; 2) etichetare profesorală pentru erori conceptuale; 3) evaluator simbolic pentru pași; 4) testare controlată a câștigului de învățare."
-    )
