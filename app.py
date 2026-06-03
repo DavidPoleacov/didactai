@@ -373,13 +373,15 @@ with tabs[0]:
 
 with tabs[1]:
     st.header("Tutor AI - exerciții, indicii și recomandări")
-    if ensure_neural_model_exists is None or predict_neural_student_state is None:
-        st.caption("Modelul neural este indisponibil în această instanță. App-ul rămâne funcțional pentru fluxul principal.")
-    else:
+    neural_status = {"status": "unavailable", "reason": "Modelul neural nu este disponibil în acest mediu."}
+    if ensure_neural_model_exists is not None:
         try:
-            ensure_neural_model_exists()
+            neural_status = ensure_neural_model_exists()
         except Exception as exc:
-            st.caption(f"Modelul neural nu a putut fi pregătit încă: {exc}")
+            neural_status = {"status": "unavailable", "reason": str(exc)}
+
+    if neural_status.get("status") != "ready":
+        st.caption(f"Modelul neural este indisponibil în această instanță: {neural_status.get('reason', 'nu este disponibil')}. App-ul rămâne funcțional pentru fluxul principal.")
 
     st.markdown("### Predicție stare de învățare (rețea neurală)")
     st.write("Modelul folosește datele de interacțiune ale elevului pentru a estima dacă starea este blocaj, progres, supraincarcare sau autonomie bună.")
@@ -396,8 +398,8 @@ with tabs[1]:
         neural_errors = st.number_input("Erori consecutive", min_value=0, max_value=6, value=1, step=1, key="nn_errors")
         neural_help = st.number_input("Nivel de ajutor cerut", min_value=0, max_value=3, value=1, step=1, key="nn_help")
 
-    if ensure_neural_model_exists is None or predict_neural_student_state is None:
-        st.info("Predicția neurală este dezactivată momentan în acest mediu de deployment.")
+    if neural_status.get("status") != "ready" or predict_neural_student_state is None:
+        st.info("Predicția neurală este dezactivată momentan în acest mediu de deployment. Folosește fluxul principal de exerciții și feedback.")
     elif st.button("Predice stare de învățare", type="primary"):
         try:
             prediction = predict_neural_student_state(
