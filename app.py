@@ -164,6 +164,7 @@ for col in ["Dificultate", "Itemul", "Sursa_year"]:
     if col in data.columns:
         data[col] = pd.to_numeric(data[col], errors="coerce")
 
+# Initialize session state for learning tracking and interaction history
 if "mastery" not in st.session_state:
     st.session_state.mastery = 0.55
 if "hints_used" not in st.session_state:
@@ -176,6 +177,30 @@ if "diagnostic_results" not in st.session_state:
     st.session_state.diagnostic_results = None
 if "diagnostic_seed" not in st.session_state:
     st.session_state.diagnostic_seed = int(time.time()) % 100000
+
+# Neural model integration tracking
+if "interaction_log" not in st.session_state:
+    st.session_state.interaction_log = []
+if "current_exercise_start_time" not in st.session_state:
+    st.session_state.current_exercise_start_time = None
+if "current_exercise_attempt_count" not in st.session_state:
+    st.session_state.current_exercise_attempt_count = 0
+if "current_exercise_hint_count" not in st.session_state:
+    st.session_state.current_exercise_hint_count = 0
+if "current_exercise_mistake_count" not in st.session_state:
+    st.session_state.current_exercise_mistake_count = 0
+if "current_exercise_consecutive_errors" not in st.session_state:
+    st.session_state.current_exercise_consecutive_errors = 0
+if "neural_available" not in st.session_state:
+    st.session_state.neural_available = False
+
+# Check neural model availability once at startup
+if ensure_neural_model_exists is not None:
+    try:
+        neural_check = ensure_neural_model_exists()
+        st.session_state.neural_available = neural_check.get("status") == "ready"
+    except Exception:
+        st.session_state.neural_available = False
 
 st.title("🧠 Didact AI")
 st.subheader("Un tutor de matematică clar, practic și adaptat progresului tău.")
@@ -281,9 +306,114 @@ def show_probabilities(probabilities: dict | None, title: str):
     st.bar_chart(probs.set_index("clasă"))
 
 
+def encode_difficulty_to_number(difficulty_group: str) -> int:
+    """Map difficulty label to numeric encoding for neural model."""
+    mapping = {
+        "1 - bază": 1,
+        "2 - mediu": 2,
+        "3 - consolidare": 3,
+        "4 - avansat": 4,
+    }
+    return mapping.get(str(difficulty_group), 2)
+
+
+def infer_help_level(hints_used: int) -> int:
+    """Infer help level from hints used."""
+    # 0 = no help, 1 = abstract hint, 2 = concrete hint, 3 = step-by-step hint
+    return min(hints_used, 3)
+
+
+def start_new_exercise(exercise_row: dict) -> None:
+    """Initialize tracking for a new exercise."""
+    st.session_state.current_exercise_start_time = time.time()
+    st.session_state.current_exercise_attempt_count = 0
+    st.session_state.current_exercise_hint_count = 0
+    st.session_state.current_exercise_mistake_count = 0
+    st.session_state.current_exercise_consecutive_errors = 0
+
+
+def get_neural_prediction(row: dict, is_correct: bool, time_spent: float) -> dict | None:
+    """Get neural model prediction for current exercise state."""
+    if not st.session_state.neural_available or predict_neural_student_state is None:
+        return None
+
+    try:
+        difficulty_encoded = encode_difficulty_to_number(row.get("Dificultate_group", "2 - mediu"))
+        help_level = infer_help_level(st.session_state.current_exercise_hint_count)
+        
+        # Update consecutive errors
+        if not is_correct:
+            st.session_state.current_exercise_consecutive_errors += 1
+        else:
+            st.session_state.current_exercise_consecutive_errors = 0
+
+        features = {
+            "time_spent_seconds": float(time_spent),
+            "hint_count": float(st.session_state.current_exercise_hint_count),
+            "attempt_count": float(st.session_state.current_exercise_attempt_count),
+            "is_correct": float(1.0 if is_correct else 0.0),
+            "mistake_count": float(st.session_state.current_exercise_mistake_count),
+            "exercise_difficulty_encoded": float(difficulty_encoded),
+            "previous_mastery": float(st.session_state.mastery),
+            "consecutive_errors": float(st.session_state.current_exercise_consecutive_errors),
+            "help_level_requested": float(help_level),
+        }
+        return predict_neural_student_state(features)
+    except Exception as e:
+        st.warning(f"Neural prediction failed (reverting to rule-based): {str(e)[:100]}")
+        return None
+
+
+def record_interaction_to_log(
+    row: dict,
+    predicted_domain: str,
+    predicted_difficulty: str,
+    time_spent: float,
+    is_correct: bool,
+    predicted_state: str | None = None,
+) -> None:
+    """Record the interaction to session history."""
+    entry = {
+        "exercise_id": int(row.get("Itemul", 0)) if pd.notna(row.get("Itemul")) else 0,
+        "problem_text": str(row.get("Problema", ""))[:200],
+        "predicted_domain": predicted_domain,
+        "predicted_difficulty": predicted_difficulty,
+        "time_spent_seconds": float(time_spent),
+        "hint_count": int(st.session_state.current_exercise_hint_count),
+        "attempt_count": int(st.session_state.current_exercise_attempt_count),
+        "mistake_count": int(st.session_state.current_exercise_mistake_count),
+        "is_correct": bool(is_correct),
+        "predicted_learning_state": predicted_state or "unknown",
+        "timestamp": time.time(),
+    }
+    st.session_state.interaction_log.append(entry)
+
+
+def get_neural_based_recommendation(predicted_state: str, row: dict) -> dict:
+    """Get exercise recommendation based on neural state prediction."""
+    domain = row.get("Domeniu", "Toate")
+    
+    if predicted_state == "blocaj":
+        # Blocked state: recommend easier exercise + concrete hint
+        target = "1 - bază"
+    elif predicted_state == "progres":
+        # Progress state: recommend slightly harder exercise
+        target = "2 - mediu"
+    elif predicted_state == "supraincarcare":
+        # Overwhelmed state: recommend simple guided task
+        target = "1 - bază"
+    else:  # autonomie_buna
+        # Good autonomy: offer challenge
+        target = "3 - consolidare"
+    
+    next_ex = recommend_next_exercise(data, domain, target, exclude_problem=row.get("Problema", ""), random_state=42)
+    return {"target": target, "exercise": next_ex, "state": predicted_state}
+
+
 tabs = st.tabs([
     "🏠 Acasă",
     "🤖 Tutor AI",
+    "📈 Progresul meu",
 ])
 
 with tabs[0]:
@@ -377,89 +507,229 @@ with tabs[0]:
         show_probabilities(diff_pred.get("probabilities"), "Probabilități dificultate")
 
 with tabs[1]:
-    st.header("Tutor AI - exerciții, indicii și recomandări")
-    neural_status = {"status": "unavailable", "reason": "Modelul neural nu este disponibil în acest mediu."}
-    if ensure_neural_model_exists is not None:
-        try:
-            neural_status = ensure_neural_model_exists()
-        except Exception as exc:
-            neural_status = {"status": "unavailable", "reason": str(exc)}
+    st.header("🤖 Tutor AI - Rezolvă exerciții și progresează")
+    st.markdown("Sistemul urmărește automat progresul tău prin rețeaua neurală. Pur și simplu rezolvă exercițiile și vei vedea feedback intel igent.")
+    
+    if not st.session_state.neural_available:
+        st.warning("⚠️ Modelul neural nu este disponibil - vei folosi feedback bazat pe reguli pedagogice, ceea ce funcționează perfect bine!")
+    else:
+        st.success("✓ Modelul neural este activ și urmărește progresul tău.")
 
-    if neural_status.get("status") != "ready":
-        st.caption(f"Modelul neural este indisponibil în această instanță: {neural_status.get('reason', 'nu este disponibil')}. App-ul rămâne funcțional pentru fluxul principal.")
+    # Exercise selector
+    domains = sorted(data["Domeniu"].dropna().unique().tolist())
+    selected_domain = st.selectbox("Alege domeniul pentru a continua", domains, key="tutor_domain")
+    
+    filtered_by_domain = data[data["Domeniu"] == selected_domain] if selected_domain else data
+    if filtered_by_domain.empty:
+        st.warning("Nu există exerciții în acest domeniu.")
+        st.stop()
 
-    st.markdown("### Predicție stare de învățare (rețea neurală)")
-    st.write("Modelul folosește datele de interacțiune ale elevului pentru a estima dacă starea este blocaj, progres, supraincarcare sau autonomie bună.")
-    neural_col1, neural_col2 = st.columns([1, 1])
-    with neural_col1:
-        neural_time = st.number_input("Timp petrecut (secunde)", min_value=5, max_value=600, value=75, step=5, key="nn_time")
-        neural_hints = st.number_input("Indicii folosite", min_value=0, max_value=6, value=1, step=1, key="nn_hints")
-        neural_attempts = st.number_input("Încercări", min_value=1, max_value=6, value=2, step=1, key="nn_attempts")
-        neural_is_correct = st.selectbox("Răspuns corect?", [0, 1], index=1, key="nn_correct")
-    with neural_col2:
-        neural_mistakes = st.number_input("Greșeli", min_value=0, max_value=8, value=2, step=1, key="nn_mistakes")
-        neural_difficulty = st.number_input("Dificultate exercițiu (cod)", min_value=1, max_value=4, value=2, step=1, key="nn_difficulty")
-        neural_mastery = st.slider("Stăpânire anterioară", 0.0, 1.0, 0.55, step=0.01, key="nn_mastery")
-        neural_errors = st.number_input("Erori consecutive", min_value=0, max_value=6, value=1, step=1, key="nn_errors")
-        neural_help = st.number_input("Nivel de ajutor cerut", min_value=0, max_value=3, value=1, step=1, key="nn_help")
+    # Start new exercise
+    if st.button("▶ Începe exercițiu nou", type="primary", key="start_new_exercise"):
+        exercise_candidates = filtered_by_domain.sample(min(5, len(filtered_by_domain)), random_state=42)
+        selected_idx = exercise_candidates.index[0]
+        st.session_state.selected_exercise_idx = selected_idx
+        start_new_exercise(data.loc[selected_idx])
 
-    if neural_status.get("status") != "ready" or predict_neural_student_state is None:
-        st.info("Predicția neurală este dezactivată momentan în acest mediu de deployment. Folosește fluxul principal de exerciții și feedback.")
-    elif st.button("Predice stare de învățare", type="primary"):
-        try:
-            prediction = predict_neural_student_state(
-                {
-                    "time_spent_seconds": float(neural_time),
-                    "hint_count": float(neural_hints),
-                    "attempt_count": float(neural_attempts),
-                    "is_correct": float(neural_is_correct),
-                    "mistake_count": float(neural_mistakes),
-                    "exercise_difficulty_encoded": float(neural_difficulty),
-                    "previous_mastery": float(neural_mastery),
-                    "consecutive_errors": float(neural_errors),
-                    "help_level_requested": float(neural_help),
-                }
-            )
-            st.success(f"Stare predictă: {prediction['predicted_state']}")
-            st.write("Acțiune pedagogică recomandată:")
-            st.info(prediction["recommended_action"])
-            with st.expander("Probabilități pe clase"):
-                for name, value in prediction["probabilities"].items():
-                    st.progress(value, text=f"{name}: {value:.2%}")
-        except Exception as exc:
-            st.error(f"Predicția neurală a eșuat: {exc}")
+    # Check if we have a current exercise
+    if "selected_exercise_idx" not in st.session_state:
+        st.info("Apasă butonul 'Începe exercițiu nou' pentru a selecta un exercițiu.")
+        st.stop()
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("1) Date structurate → dificultate")
-        st.write(
-            "Modelul primește features tabelare: temă normalizată, domeniu, tip sursă, numărul itemului, lungimi, simboluri matematice și indicatori de context. Output: dificultatea estimată."
-        )
-        st.code("Input: [Tema_norm, Domeniu, Sursa_type, Itemul, problem_words, n_math_symbols, ...]\nOutput: 1 - bază / 2 - mediu / 3 - consolidare / 4 - avansat")
-        manual_domain = st.selectbox("Domeniu manual", sorted(data["Domeniu"].unique()), key="manual_domain")
-        manual_topic = st.selectbox("Temă manuală", sorted(data["Tema_norm"].unique()), key="manual_topic")
-        manual_problem = st.text_area("Problemă pentru test structurat", value="Calculați valoarea expresiei 2x + 5 pentru x = 3.")
-        manual_features = prepare_single_problem(manual_problem, manual_topic, manual_domain, item=5, sursa_type="manual")
-        manual_diff = predict_structured_difficulty(structured_model, manual_features)
-        st.success(f"Dificultate estimată: {manual_diff['prediction']}")
-        show_probabilities(manual_diff.get("probabilities"), "Distribuție dificultate")
+    exercise_idx = st.session_state.selected_exercise_idx
+    current_row = data.loc[exercise_idx]
+    
+    st.divider()
+    st.markdown("### 📝 Problemă")
+    st.markdown(f"<div class='main-card'>{current_row['Problema']}</div>", unsafe_allow_html=True)
+    st.caption(f"Domeniu: **{current_row.get('Domeniu', '—')}** · Temă: **{current_row.get('Tema_norm', '—')}** · Nivel: **{current_row.get('Dificultate_group', '—')}**")
 
-    with c2:
-        st.subheader("2) Text nestructurat → domeniu curricular")
-        st.write(
-            "Modelul primește enunțul brut al problemei și îl clasifică în domeniul curricular. Este serviciul util când încă nu avem etichete manuale pentru o problemă nouă."
-        )
-        st.code("Input: text liber al problemei\nOutput: Geometrie / Funcții / Ecuații... / Mulțimi numerice / ...")
-        text_problem = st.text_area(
-            "Problemă nouă pentru clasificare text",
-            value="În triunghiul ABC, AB = AC și unghiul A este 40°. Determinați măsura unghiului B.",
-        )
-        text_pred = predict_domain_from_text(unstructured_model, text_problem)
-        st.success(f"Domeniu estimat: {text_pred['prediction']}")
-        show_probabilities(text_pred.get("probabilities"), "Distribuție domeniu")
-
-    st.markdown("### De ce nu ajunge un singur serviciu?")
-    st.write(
-        "Modelul pe text etichetează probleme noi după conținut. Modelul pe date structurate estimează nivelul de dificultate și susține recomandarea adaptivă. Dacă eliminăm modelul text, nu putem eticheta probleme noi; dacă eliminăm modelul structurat, nu putem controla progresia dificultății în traseul elevului."
+    # Student answer and tracking
+    student_answer = st.text_area(
+        "Scrie răspunsul tău",
+        placeholder="Introdu răspunsul aici...",
+        key=f"tutor_answer_{exercise_idx}",
     )
+
+    col_hints, col_submit = st.columns([1, 1])
+    
+    with col_hints:
+        if st.button("💡 Cere un indiciu"):
+            st.session_state.current_exercise_hint_count += 1
+            hint = choose_hint(
+                current_row["Problema"],
+                current_row.get("Pasii de rezolvare", ""),
+                st.session_state.mastery,
+                st.session_state.current_exercise_hint_count
+            )
+            st.markdown(f"**Tip: {hint['hint_type']}**")
+            st.info(hint["hint"])
+
+    with col_submit:
+        if st.button("✓ Verifică răspunsul", type="primary"):
+            # Increment attempt count
+            st.session_state.current_exercise_attempt_count += 1
+            
+            # Evaluate answer
+            result = evaluate_answer(student_answer, current_row.get("Raspunsul", ""))
+            is_correct = result["correct"]
+            
+            # Track time and update consecutive errors
+            time_spent = time.time() - st.session_state.current_exercise_start_time
+            if not is_correct:
+                st.session_state.current_exercise_mistake_count += 1
+
+            # Get predictions from ML models
+            domain_pred = predict_domain_from_text(unstructured_model, str(current_row["Problema"]))
+            feature_row = data.loc[[exercise_idx]][[
+                "Itemul", "Sursa_year", "problem_chars", "problem_words", "steps_chars", "answer_chars",
+                "n_digits", "n_math_symbols", "has_percent", "has_geometry_word", "has_equation_word",
+                "has_radical", "has_function_word", "has_real_life_context", "Tema_norm", "Domeniu", "Sursa_type"
+            ]]
+            diff_pred = predict_structured_difficulty(structured_model, feature_row)
+
+            # Get neural prediction (if available)
+            neural_pred = get_neural_prediction(current_row, is_correct, time_spent)
+            predicted_state = neural_pred["predicted_state"] if neural_pred else None
+
+            # Record to interaction log
+            record_interaction_to_log(
+                current_row,
+                domain_pred["prediction"],
+                diff_pred["prediction"],
+                time_spent,
+                is_correct,
+                predicted_state
+            )
+
+            # Update mastery
+            learning_state = diagnose_learning_state(
+                is_correct,
+                st.session_state.current_exercise_hint_count,
+                st.session_state.current_exercise_attempt_count,
+                int(time_spent)
+            )
+            new_mastery = update_mastery(
+                st.session_state.mastery,
+                is_correct,
+                st.session_state.current_exercise_hint_count,
+                st.session_state.current_exercise_attempt_count
+            )
+            st.session_state.mastery = new_mastery
+
+            # Display feedback
+            st.divider()
+            if is_correct:
+                st.success("✓ Răspunsul este corect!")
+            else:
+                st.error("✗ Răspunsul nu este corect. Încearcă din nou sau cere un indiciu.")
+            
+            st.write(result["feedback"])
+
+            # Show ML insights
+            with st.expander("📊 Analiza sistemului"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Timp petrecut", f"{int(time_spent)}s")
+                with col2:
+                    st.metric("Indicii folosite", st.session_state.current_exercise_hint_count)
+                with col3:
+                    st.metric("Noua stăpânire", f"{new_mastery:.2f}")
+                
+                st.markdown("**Predicții ML:**")
+                st.write(f"- Domeniu estimat: **{domain_pred['prediction']}**")
+                st.write(f"- Dificultate estimată: **{diff_pred['prediction']}**")
+                if neural_pred:
+                    st.write(f"- Stare de învățare (neural): **{neural_pred['predicted_state']}**")
+                    st.write(f"  Recomandare: {neural_pred['recommended_action']}")
+
+            # Show rule-based feedback
+            st.markdown("**Feedback pedagogic:**")
+            st.write(f"- Stare: {learning_state['state']}")
+            st.write(f"- Intervenție: {learning_state['intervention']}")
+            st.write(f"- Reactivare spaced repetition: {next_review_date(new_mastery, is_correct)}")
+
+            # Recommend next exercise
+            if is_correct or st.session_state.current_exercise_attempt_count >= 3:
+                if neural_pred and st.session_state.neural_available:
+                    rec = get_neural_based_recommendation(neural_pred["predicted_state"], current_row)
+                    target = rec["target"]
+                    next_ex = rec["exercise"]
+                else:
+                    target = target_difficulty_from_mastery(new_mastery, is_correct)
+                    next_ex = recommend_next_exercise(data, current_row["Domeniu"], target, exclude_problem=current_row["Problema"], random_state=42)
+
+                if next_ex is not None and not next_ex.empty:
+                    st.markdown("---")
+                    st.markdown("### 🎯 Exercițiul următor recomandat")
+                    st.write(f"Țintă: **{target}** (pe baza progresului tău actual)")
+                    st.markdown(f"<div class='main-card'>{next_ex.iloc[0]['Problema']}</div>", unsafe_allow_html=True)
+                    if st.button("Continuă cu exercițiul următor ➜", type="primary"):
+                        next_idx = next_ex.index[0]
+                        st.session_state.selected_exercise_idx = next_idx
+                        start_new_exercise(data.loc[next_idx])
+                        st.rerun()
+
+with tabs[2]:
+    st.header("📈 Progresul meu")
+    
+    if not st.session_state.interaction_log:
+        st.info("Încă nu ai rezolvat exerciții. Mergi la **Tutor AI** și începe cu un exercițiu nou!")
+        st.stop()
+
+    log_df = pd.DataFrame(st.session_state.interaction_log)
+
+    # Overall statistics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Exerciții rezolvate", len(log_df))
+    with col2:
+        accuracy = (log_df["is_correct"].sum() / len(log_df) * 100) if len(log_df) > 0 else 0
+        st.metric("Acuratețe", f"{accuracy:.1f}%")
+    with col3:
+        avg_hints = log_df["hint_count"].mean()
+        st.metric("Indicii în medie", f"{avg_hints:.1f}")
+    with col4:
+        avg_time = log_df["time_spent_seconds"].mean()
+        st.metric("Timp mediu/exercițiu", f"{int(avg_time)}s")
+
+    st.divider()
+
+    # Domain breakdown
+    st.markdown("### Progres pe domenii")
+    domain_stats = log_df.groupby("predicted_domain").agg({
+        "is_correct": ["sum", "count"],
+        "time_spent_seconds": "mean",
+    }).round(2)
+    domain_stats.columns = ["Corecte", "Total", "Timp mediu (s)"]
+    if len(domain_stats) > 0:
+        st.dataframe(domain_stats, use_container_width=True)
+
+    # Learning state distribution
+    if "predicted_learning_state" in log_df.columns and log_df["predicted_learning_state"].notna().any():
+        st.markdown("### Stări de învățare detectate")
+        state_counts = log_df["predicted_learning_state"].value_counts()
+        st.bar_chart(state_counts)
+        
+        st.markdown("**Interpretare:**")
+        st.write("- **blocaj**: Ai nevoie de exerciții mai ușoare și indicii concrete")
+        st.write("- **progres**: Mergi înainte - încearcă exerciții puțin mai grele")
+        st.write("- **supraincarcare**: Ai prea mult - hai la ceva mai simplu")
+        st.write("- **autonomie_buna**: Gata! Poți face exerciții mai dificile singur")
+
+    # Recent interactions
+    st.markdown("### Istoric recent")
+    recent = log_df.tail(10)[["problem_text", "predicted_difficulty", "hint_count", "attempt_count", "is_correct", "time_spent_seconds"]].copy()
+    recent["Rezultat"] = recent["is_correct"].map({True: "✓ Corect", False: "✗ Incorect"})
+    recent = recent.drop("is_correct", axis=1)
+    st.dataframe(recent, use_container_width=True)
+
+    # Reset progress button
+    if st.button("🔄 Resetează progresul", key="reset_progress"):
+        st.session_state.interaction_log = []
+        st.session_state.mastery = 0.55
+        st.success("Progresul a fost resetat!")
+        st.rerun()
+
+
 
