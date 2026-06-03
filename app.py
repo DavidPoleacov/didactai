@@ -16,6 +16,7 @@ from src.model_utils import (
     predict_structured_difficulty,
     resolve_dataset_path,
 )
+from src.neural_student_state_model import ensure_neural_model_exists, predict_neural_student_state
 from src.pedagogical_engine import (
     METACOGNITIVE_QUESTIONS,
     assess_diagnostic_results,
@@ -367,6 +368,50 @@ with tabs[0]:
 
 with tabs[1]:
     st.header("Tutor AI - exerciții, indicii și recomandări")
+    try:
+        ensure_neural_model_exists()
+    except Exception as exc:
+        st.caption(f"Modelul neural nu a putut fi pregătit încă: {exc}")
+
+    st.markdown("### Predicție stare de învățare (rețea neurală)")
+    st.write("Modelul folosește datele de interacțiune ale elevului pentru a estima dacă starea este blocaj, progres, supraincarcare sau autonomie bună.")
+    neural_col1, neural_col2 = st.columns([1, 1])
+    with neural_col1:
+        neural_time = st.number_input("Timp petrecut (secunde)", min_value=5, max_value=600, value=75, step=5, key="nn_time")
+        neural_hints = st.number_input("Indicii folosite", min_value=0, max_value=6, value=1, step=1, key="nn_hints")
+        neural_attempts = st.number_input("Încercări", min_value=1, max_value=6, value=2, step=1, key="nn_attempts")
+        neural_is_correct = st.selectbox("Răspuns corect?", [0, 1], index=1, key="nn_correct")
+    with neural_col2:
+        neural_mistakes = st.number_input("Greșeli", min_value=0, max_value=8, value=2, step=1, key="nn_mistakes")
+        neural_difficulty = st.number_input("Dificultate exercițiu (cod)", min_value=1, max_value=4, value=2, step=1, key="nn_difficulty")
+        neural_mastery = st.slider("Stăpânire anterioară", 0.0, 1.0, 0.55, step=0.01, key="nn_mastery")
+        neural_errors = st.number_input("Erori consecutive", min_value=0, max_value=6, value=1, step=1, key="nn_errors")
+        neural_help = st.number_input("Nivel de ajutor cerut", min_value=0, max_value=3, value=1, step=1, key="nn_help")
+
+    if st.button("Predice stare de învățare", type="primary"):
+        try:
+            prediction = predict_neural_student_state(
+                {
+                    "time_spent_seconds": float(neural_time),
+                    "hint_count": float(neural_hints),
+                    "attempt_count": float(neural_attempts),
+                    "is_correct": float(neural_is_correct),
+                    "mistake_count": float(neural_mistakes),
+                    "exercise_difficulty_encoded": float(neural_difficulty),
+                    "previous_mastery": float(neural_mastery),
+                    "consecutive_errors": float(neural_errors),
+                    "help_level_requested": float(neural_help),
+                }
+            )
+            st.success(f"Stare predictă: {prediction['predicted_state']}")
+            st.write("Acțiune pedagogică recomandată:")
+            st.info(prediction["recommended_action"])
+            with st.expander("Probabilități pe clase"):
+                for name, value in prediction["probabilities"].items():
+                    st.progress(value, text=f"{name}: {value:.2%}")
+        except Exception as exc:
+            st.error(f"Predicția neurală a eșuat: {exc}")
+
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("1) Date structurate → dificultate")
