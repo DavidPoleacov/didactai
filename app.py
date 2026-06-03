@@ -18,7 +18,7 @@ from src.model_utils import (
 )
 try:
     from src.neural_student_state_model import ensure_neural_model_exists, predict_neural_student_state
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError, Exception):
     ensure_neural_model_exists = None
     predict_neural_student_state = None
 
@@ -93,11 +93,16 @@ def cached_assets(dataset_signature: str, report_signature: str):
     return load_assets()
 
 
-st.cache_resource.clear()
+# Cache will persist by default. For development, use st.cache_resource.clear() manually if needed.
 
-dataset_signature = _asset_signature(resolve_dataset_path())
-report_signature = _asset_signature(ROOT / "models" / "evaluation_report.json")
-structured_model, unstructured_model, data, report = cached_assets(dataset_signature, report_signature)
+try:
+    dataset_signature = _asset_signature(resolve_dataset_path())
+    report_signature = _asset_signature(ROOT / "models" / "evaluation_report.json")
+    structured_model, unstructured_model, data, report = cached_assets(dataset_signature, report_signature)
+except Exception as e:
+    st.error(f"Failed to load ML assets: {e}")
+    st.info("Please check that all model files and data files are present in the models/ and data/processed/ directories.")
+    st.stop()
 
 
 def render_tutor_exercise(row: dict, exercise_idx: int, key_prefix: str) -> None:
