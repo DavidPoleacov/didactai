@@ -8,7 +8,6 @@ from typing import Dict, List
 import joblib
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
@@ -18,8 +17,16 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from tensorflow.keras import layers, models
-from tensorflow.keras.callbacks import EarlyStopping
+
+try:
+    import tensorflow as tf
+    from tensorflow.keras import layers, models
+    from tensorflow.keras.callbacks import EarlyStopping
+except ModuleNotFoundError:  # pragma: no cover - runtime fallback for deployment images
+    tf = None
+    layers = None
+    models = None
+    EarlyStopping = None
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
@@ -114,6 +121,9 @@ def load_student_interactions(path: Path = PROCESSED_DIR / "student_interactions
 
 def train_neural_student_state_model(path: Path = PROCESSED_DIR / "student_interactions.csv") -> Dict:
     """Train the neural network and save model artifacts to models/."""
+    if tf is None or models is None or layers is None or EarlyStopping is None:
+        raise ModuleNotFoundError("TensorFlow is required to train the neural student-state model.")
+
     _ensure_seed(42)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -207,6 +217,9 @@ def train_neural_student_state_model(path: Path = PROCESSED_DIR / "student_inter
 
 
 def load_neural_model_artifacts() -> Dict[str, object]:
+    if tf is None or models is None:
+        raise ModuleNotFoundError("TensorFlow is required to load the neural student-state model.")
+
     model = tf.keras.models.load_model(MODELS_DIR / "neural_student_state_model.keras")
     scaler = joblib.load(MODELS_DIR / "neural_student_state_scaler.joblib")
     label_encoder = joblib.load(MODELS_DIR / "neural_student_state_label_encoder.joblib")
@@ -214,6 +227,9 @@ def load_neural_model_artifacts() -> Dict[str, object]:
 
 
 def predict_neural_student_state(features_dict: Dict[str, float]) -> Dict[str, object]:
+    if tf is None or models is None:
+        raise ModuleNotFoundError("TensorFlow is required to run the neural student-state model.")
+
     artifacts = load_neural_model_artifacts()
     model = artifacts["model"]
     scaler = artifacts["scaler"]
@@ -240,6 +256,8 @@ def predict_neural_student_state(features_dict: Dict[str, float]) -> Dict[str, o
 
 
 def ensure_neural_model_exists() -> Dict:
+    if tf is None or models is None or layers is None or EarlyStopping is None:
+        return {"status": "unavailable", "reason": "TensorFlow runtime is not available in this environment."}
     if not (MODELS_DIR / "neural_student_state_model.keras").exists():
         return train_neural_student_state_model()
     return {"status": "ready", "model": str(MODELS_DIR / "neural_student_state_model.keras")}
