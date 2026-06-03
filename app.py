@@ -17,9 +17,11 @@ from src.model_utils import (
 )
 from src.pedagogical_engine import (
     METACOGNITIVE_QUESTIONS,
+    assess_diagnostic_results,
     choose_hint,
     diagnose_learning_state,
     evaluate_answer,
+    generate_diagnostic_bank,
     next_review_date,
     recommend_next_exercise,
     target_difficulty_from_mastery,
@@ -38,9 +40,10 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .main-card {padding: 1rem 1.2rem; border: 1px solid #E5E7EB; border-radius: 16px; background: #FFFFFF;}
-    .metric-card {padding: 0.8rem; border-radius: 14px; background: #F8FAFC; border: 1px solid #E2E8F0;}
-    .small-muted {color: #64748B; font-size: 0.9rem;}
+    .main-card {padding: 1rem 1.2rem; border: 1px solid #E5E7EB; border-radius: 16px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);}
+    .hero-card {padding: 1rem; border-radius: 16px; background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 100%); border: 1px solid #E5E7EB;}
+    .pill {display: inline-block; background: #EEF2FF; color: #3730A3; padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.82rem; font-weight: 600;}
+    .small-muted {color: #64748B; font-size: 0.92rem;}
     .rubric-good {background: #ECFDF5; color: #065F46; padding: 0.15rem 0.45rem; border-radius: 999px; font-weight: 600;}
     .rubric-warn {background: #FEF3C7; color: #92400E; padding: 0.15rem 0.45rem; border-radius: 999px; font-weight: 600;}
     </style>
@@ -49,8 +52,16 @@ st.markdown(
 )
 
 
+def _asset_signature(path: Path) -> str:
+    try:
+        stat = path.stat()
+        return f"{path}:{stat.st_mtime_ns}:{stat.st_size}"
+    except FileNotFoundError:
+        return f"{path}:missing"
+
+
 @st.cache_resource(show_spinner="Loading/training ML services...")
-def cached_assets():
+def cached_assets(dataset_signature: str, report_signature: str):
     required = [
         ROOT / "models" / "structured_difficulty_model.joblib",
         ROOT / "models" / "unstructured_domain_model.joblib",
@@ -75,7 +86,11 @@ def cached_assets():
     return load_assets()
 
 
-structured_model, unstructured_model, data, report = cached_assets()
+st.cache_resource.clear()
+
+dataset_signature = _asset_signature(resolve_dataset_path())
+report_signature = _asset_signature(ROOT / "models" / "evaluation_report.json")
+structured_model, unstructured_model, data, report = cached_assets(dataset_signature, report_signature)
 
 # Fix dtypes after CSV load.
 for col in ["Dificultate", "Itemul", "Sursa_year"]:
@@ -88,12 +103,71 @@ if "hints_used" not in st.session_state:
     st.session_state.hints_used = 0
 if "attempts" not in st.session_state:
     st.session_state.attempts = 1
+if "diagnostic_started" not in st.session_state:
+    st.session_state.diagnostic_started = False
+if "diagnostic_results" not in st.session_state:
+    st.session_state.diagnostic_results = None
 
 st.title("🧠 Didact AI")
-st.subheader("Tutor adaptiv pentru învățarea activă a matematicii")
-st.caption(
-    "MVP construit pentru a demonstra clar cele două servicii ML cerute: un model pe date structurate și un model pe text nestructurat."
-)
+st.subheader("Un tutor de matematică clar, practic și adaptat progresului tău.")
+st.caption("Poți începe cu un diagnostic scurt, apoi primi exerciții potrivite acolo unde te blochezi cel mai mult.")
+
+hero = st.columns(3)
+with hero[0]:
+    st.markdown("<div class='hero-card'><span class='pill'>Pasul 1</span><br><strong>Diagnostic scurt</strong><br>Un set de întrebări simple care arată unde ai nevoie de sprijin.</div>", unsafe_allow_html=True)
+with hero[1]:
+    st.markdown("<div class='hero-card'><span class='pill'>Pasul 2</span><br><strong>Exerciții potrivite</strong><br>Sistemul recomandă teme relevante, nu exerciții arbitrare.</div>", unsafe_allow_html=True)
+with hero[2]:
+    st.markdown("<div class='hero-card'><span class='pill'>Pasul 3</span><br><strong>Feedback clar</strong><br>Vezi ce ai făcut bine și unde merită să exersezi mai mult.</div>", unsafe_allow_html=True)
+
+st.markdown("---")
+st.markdown("### 🧭 Începe cu un diagnostic scurt")
+st.info("Nu trebuie să fii perfect. Scrie răspunsul cât poți și sistemul va sugera apoi exerciții pe zonele care merită mai multă practică.")
+
+if not st.session_state.diagnostic_started:
+    st.caption("Acest pas te ajută să vezi rapid unde ai nevoie de sprijin, fără să te simți copleșit.")
+    if st.button("Începe testul de diagnostic", type="primary"):
+        st.session_state.diagnostic_started = True
+        st.rerun()
+else:
+    diagnostic_bank = generate_diagnostic_bank(data, n_questions=5, random_state=7)
+    st.caption("Ai 5 întrebări scurte. Răspunde natural și apoi primești o recomandare simplă asupra temelor de exersat.")
+    diagnostic_answers = []
+    for idx, row in enumerate(diagnostic_bank, start=1):
+        answer = st.text_input(f"{idx}. {row['Problema'][:140]}...", key=f"diag_{idx}")
+        if answer:
+            result = evaluate_answer(answer, str(row.get("Raspunsul", "")))
+            diagnostic_answers.append({"problem": row["Problema"], "domain": row.get("Domeniu"), "correct": result["correct"]})
+    if st.button("Finalizează diagnostic și recomandă exerciții", type="primary"):
+        profile = assess_diagnostic_results(diagnostic_answers, data)
+        st.session_state.diagnostic_results = profile
+        st.success("Diagnostic finalizat. Am identificat zonele unde merită să exersezi mai mult.")
+        st.rerun()
+
+if st.session_state.diagnostic_results:
+    profile = st.session_state.diagnostic_results
+    st.markdown("### Rezumatul tău de început")
+    weak_domains = profile.get("weak_domains", [])
+    if weak_domains:
+        st.write("Punctele unde te-ai blocat cel mai mult sunt:")
+        for domain in weak_domains[:3]:
+            st.markdown(f"- **{domain}**")
+    else:
+        st.write("Nu am identificat o zonă clară de dificultate din răspunsurile de acum. Poți continua cu exerciții generale.")
+
+    for item in profile.get("recommended_themes", [])[:3]:
+        st.markdown(f"- **{item['domain']}** → teme sugerate: {', '.join(item['themes'])}")
+
+    if profile.get("weak_domains"):
+        weak_domain = profile["weak_domains"][0]
+        rec = recommend_next_exercise(data, weak_domain, "2 - mediu", random_state=11)
+        if rec:
+            st.markdown("### Exercițiul de început recomandat")
+            st.markdown(f"Tema prioritară: **{weak_domain}**")
+            st.markdown(f"<div class='main-card'>{rec['Problema']}</div>", unsafe_allow_html=True)
+            st.caption(f"{rec['Tema_norm']} · {rec['Dificultate_group']}")
+
+st.markdown("---")
 
 with st.sidebar:
     st.header("Profil elev")
@@ -108,13 +182,13 @@ with st.sidebar:
 # Top scorecard
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Exerciții procesate", report["dataset"]["rows_total"])
+    st.metric("Exerciții disponibile", report["dataset"]["rows_total"])
 with col2:
-    st.metric("Model structurat macro-F1", f"{report['structured_model']['model']['macro_f1']:.3f}")
+    st.metric("Calitate model structură", f"{report['structured_model']['model']['macro_f1']:.3f}")
 with col3:
-    st.metric("Model text macro-F1", f"{report['unstructured_model']['model']['macro_f1']:.3f}")
+    st.metric("Calitate model text", f"{report['unstructured_model']['model']['macro_f1']:.3f}")
 with col4:
-    st.metric("Rubrică acoperită", "10/10 criterii")
+    st.metric("Acoperire demo", "10/10 criterii")
 
 
 def show_probabilities(probabilities: dict | None, title: str):
@@ -153,12 +227,12 @@ def confusion_dataframe(section: str) -> pd.DataFrame:
 
 
 tabs = st.tabs([
-    "🎓 Tutor demo",
-    "🧩 Cele 2 servicii ML",
-    "📊 Evaluare & EDA",
-    "🏆 Strategie pentru punctaj maxim",
-    "❓ Q&A pentru juriu",
-    "⚖️ Etică & limitări",
+    "🎓 Exerciții și feedback",
+    "🧩 Cum funcționează modelul",
+    "📊 Date și rezultate",
+    "🏆 Cum am construit proiectul",
+    "❓ Răspunsuri pentru evaluare",
+    "⚖️ Etică și limite",
 ])
 
 with tabs[0]:

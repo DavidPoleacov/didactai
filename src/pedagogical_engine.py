@@ -154,6 +154,70 @@ def target_difficulty_from_mastery(mastery: float, correct: bool) -> str:
     return "4 - avansat"
 
 
+def generate_diagnostic_bank(data: pd.DataFrame, n_questions: int = 5, random_state: int = 42) -> List[Dict]:
+    """Build a small, varied diagnostic set spanning the curriculum domains."""
+    candidates = data.copy()
+    candidates = candidates[candidates["Domeniu"].notna() & (candidates["Domeniu"] != "Altele")]
+    if len(candidates) == 0:
+        return []
+
+    bank = []
+    for domain, group in candidates.groupby("Domeniu", sort=True):
+        if len(group) == 0:
+            continue
+        seed = random_state + sum(ord(ch) for ch in str(domain))
+        sample = group.sample(n=min(2, len(group)), random_state=seed % 100000)
+        bank.extend(sample.to_dict("records"))
+        if len(bank) >= n_questions:
+            break
+    return bank[:n_questions]
+
+
+def assess_diagnostic_results(responses: List[Dict], data: pd.DataFrame) -> Dict:
+    """Estimate weak domains from a short diagnostic quiz."""
+    if not responses:
+        return {"weak_domains": [], "domain_scores": {}, "recommended_themes": []}
+
+    scores = {}
+    for domain in sorted(data["Domeniu"].dropna().unique().tolist()):
+        scores[domain] = {"correct": 0, "total": 0}
+
+    for item in responses:
+        domain = item.get("domain") or item.get("Domeniu") or "Alt"
+        correct = bool(item.get("correct", False))
+        scores.setdefault(domain, {"correct": 0, "total": 0})
+        scores[domain]["correct"] += int(correct)
+        scores[domain]["total"] += 1
+
+    domain_scores = {}
+    for domain, stats in scores.items():
+        ratio = stats["correct"] / stats["total"] if stats["total"] else 0.0
+        domain_scores[domain] = {
+            "accuracy": round(ratio, 2),
+            "correct": stats["correct"],
+            "total": stats["total"],
+            "priority": round(1.0 - ratio, 2),
+        }
+
+    weak_domains = [
+        domain for domain, stats in sorted(domain_scores.items(), key=lambda kv: (kv[1]["priority"], kv[1]["accuracy"]), reverse=False)
+        if stats["total"] >= 1 and stats["accuracy"] < 0.75
+    ]
+
+    recommended_themes = []
+    for domain in weak_domains[:3]:
+        theme_pool = data[(data["Domeniu"] == domain) & (data["Tema_norm"].notna())].copy()
+        if len(theme_pool):
+            theme_pool = theme_pool.sort_values(["Dificultate", "problem_words"], ascending=[True, True])
+            recommended_themes.append({"domain": domain, "themes": theme_pool["Tema_norm"].dropna().unique().tolist()[:5]})
+
+    return {
+        "weak_domains": weak_domains,
+        "domain_scores": domain_scores,
+        "recommended_themes": recommended_themes,
+    }
+
+
 def recommend_next_exercise(
     data: pd.DataFrame,
     domain: str,
