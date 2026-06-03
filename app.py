@@ -228,8 +228,6 @@ with st.sidebar:
     st.header("Profil elev")
     name = st.text_input("Nume / poreclă", value="Alex")
     grade = st.selectbox("Clasa", ["V", "VI", "VII", "VIII", "IX"], index=4)
-    initial_mastery = st.slider("Stăpânire estimată a conceptului", 0.05, 0.95, float(st.session_state.mastery), 0.05)
-    st.session_state.mastery = initial_mastery
     st.info(
         "Profilul din demo folosește o actualizare simplă de tip knowledge tracing: corectitudine + indicii + încercări."
     )
