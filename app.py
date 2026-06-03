@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -162,6 +163,8 @@ if "diagnostic_started" not in st.session_state:
     st.session_state.diagnostic_started = False
 if "diagnostic_results" not in st.session_state:
     st.session_state.diagnostic_results = None
+if "diagnostic_seed" not in st.session_state:
+    st.session_state.diagnostic_seed = int(time.time()) % 100000
 
 st.title("🧠 Didact AI")
 st.subheader("Un tutor de matematică clar, practic și adaptat progresului tău.")
@@ -183,9 +186,10 @@ if not st.session_state.diagnostic_started:
     st.caption("Acest pas te ajută să vezi rapid unde ai nevoie de sprijin, fără să te simți copleșit.")
     if st.button("Începe testul de diagnostic", type="primary"):
         st.session_state.diagnostic_started = True
+        st.session_state.diagnostic_seed = int(time.time()) % 100000
         st.rerun()
 else:
-    diagnostic_bank = generate_diagnostic_bank(data, n_questions=5, random_state=7)
+    diagnostic_bank = generate_diagnostic_bank(data, n_questions=5, random_state=st.session_state.diagnostic_seed)
     st.caption("Ai 5 întrebări scurte. Răspunde natural și apoi primești o recomandare simplă asupra temelor de exersat.")
     diagnostic_answers = []
     for idx, row in enumerate(diagnostic_bank, start=1):
@@ -195,6 +199,10 @@ else:
             result = evaluate_answer(answer, str(row.get("Raspunsul", "")))
             diagnostic_answers.append({"problem": row["Problema"], "domain": row.get("Domeniu"), "correct": result["correct"]})
     if st.button("Finalizează diagnostic și recomandă exerciții", type="primary"):
+        if not diagnostic_answers:
+            st.warning("Completează răspunsurile la întrebările de diagnostic înainte de a primi recomandări.")
+            st.stop()
+
         profile = assess_diagnostic_results(diagnostic_answers, data)
         st.session_state.diagnostic_results = profile
         st.success("Diagnostic finalizat. Am identificat zonele unde merită să exersezi mai mult.")
@@ -220,7 +228,11 @@ if st.session_state.diagnostic_results:
         if rec:
             st.markdown("### Exercițiul de început recomandat")
             st.markdown(f"Tema prioritară: **{weak_domain}**")
-            render_tutor_exercise(rec, exercise_idx=int(rec.get("Itemul", 0) or 0), key_prefix="diag_followup")
+            try:
+                exercise_idx = int(rec.get("Itemul", 0)) if pd.notna(rec.get("Itemul")) else 0
+            except (TypeError, ValueError, OverflowError):
+                exercise_idx = 0
+            render_tutor_exercise(rec, exercise_idx=exercise_idx, key_prefix="diag_followup")
 
 st.markdown("---")
 

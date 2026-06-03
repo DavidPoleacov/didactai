@@ -155,9 +155,13 @@ def target_difficulty_from_mastery(mastery: float, correct: bool) -> str:
 
 
 def generate_diagnostic_bank(data: pd.DataFrame, n_questions: int = 5, random_state: int = 42) -> List[Dict]:
-    """Build a small, varied diagnostic set spanning the curriculum domains."""
+    """Build a varied diagnostic set from sensible, non-empty exercise rows."""
     candidates = data.copy()
     candidates = candidates[candidates["Domeniu"].notna() & (candidates["Domeniu"] != "Altele")]
+    candidates = candidates[candidates["Problema"].astype(str).str.strip().ne("")]
+    candidates = candidates[candidates["Raspunsul"].astype(str).str.strip().ne("")]
+    candidates = candidates.drop_duplicates(subset=["Problema", "Domeniu", "Tema_norm"], keep="first")
+
     if len(candidates) == 0:
         return []
 
@@ -165,11 +169,12 @@ def generate_diagnostic_bank(data: pd.DataFrame, n_questions: int = 5, random_st
     for domain, group in candidates.groupby("Domeniu", sort=True):
         if len(group) == 0:
             continue
-        seed = random_state + sum(ord(ch) for ch in str(domain))
-        sample = group.sample(n=min(2, len(group)), random_state=seed % 100000)
+        seed = (random_state + sum(ord(ch) for ch in str(domain))) % 100000
+        sample = group.sample(n=min(2, len(group)), random_state=seed)
         bank.extend(sample.to_dict("records"))
         if len(bank) >= n_questions:
             break
+
     return bank[:n_questions]
 
 
