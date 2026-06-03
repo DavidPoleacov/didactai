@@ -18,13 +18,20 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
-PROCESSED_PATH = ROOT / "data" / "processed" / "exercises_processed.csv"
+PROCESSED_PATH = ROOT / "data" / "processed" / "exercises_augmented.csv"
+FALLBACK_PROCESSED_PATH = ROOT / "data" / "processed" / "exercises_processed.csv"
+
+
+def resolve_dataset_path() -> Path:
+    if PROCESSED_PATH.exists():
+        return PROCESSED_PATH
+    return FALLBACK_PROCESSED_PATH
 
 
 def load_assets():
     structured = joblib.load(MODELS_DIR / "structured_difficulty_model.joblib")
     unstructured = joblib.load(MODELS_DIR / "unstructured_domain_model.joblib")
-    data = pd.read_csv(PROCESSED_PATH)
+    data = pd.read_csv(resolve_dataset_path())
     with open(MODELS_DIR / "evaluation_report.json", "r", encoding="utf-8") as f:
         report = json.load(f)
     return structured, unstructured, data, report

@@ -16,6 +16,8 @@ import pandas as pd
 
 RAW_DIR = Path(__file__).resolve().parents[1] / "data" / "raw"
 PROCESSED_DIR = Path(__file__).resolve().parents[1] / "data" / "processed"
+AUGMENTED_RAW_PATH = RAW_DIR / "Exercises_augmented.xlsx"
+DEFAULT_RAW_PATH = RAW_DIR / "exercises_corrected.xlsx"
 
 
 def strip_diacritics(text: str) -> str:
@@ -32,18 +34,28 @@ def clean_text(text: str) -> str:
 
 
 def load_exercises(path: str | Path | None = None) -> pd.DataFrame:
-    """Load and merge the two sheets from the provided exercise workbook."""
-    path = Path(path) if path else RAW_DIR / "exercises_corrected.xlsx"
-    sheet1 = pd.read_excel(path, sheet_name="Sheet1")
-    sheet2 = pd.read_excel(path, sheet_name="Sheet2").rename(columns={"Unnamed: 0": "Problema"})
-
+    """Load exercise rows from the legacy workbook or the augmented workbook."""
+    path = Path(path) if path else DEFAULT_RAW_PATH
+    xls = pd.ExcelFile(path)
     expected = ["Sursa", "Itemul", "Problema", "Pasii de rezolvare", "Raspunsul", "Dificultate", "Tema"]
-    for col in expected:
-        if col not in sheet1.columns:
-            sheet1[col] = np.nan
-        if col not in sheet2.columns:
-            sheet2[col] = np.nan
-    df = pd.concat([sheet1[expected], sheet2[expected]], ignore_index=True)
+
+    if len(xls.sheet_names) >= 2 and all(name in xls.sheet_names for name in ("Sheet1", "Sheet2")):
+        sheet1 = pd.read_excel(path, sheet_name="Sheet1")
+        sheet2 = pd.read_excel(path, sheet_name="Sheet2").rename(columns={"Unnamed: 0": "Problema"})
+        for col in expected:
+            if col not in sheet1.columns:
+                sheet1[col] = np.nan
+            if col not in sheet2.columns:
+                sheet2[col] = np.nan
+        df = pd.concat([sheet1[expected], sheet2[expected]], ignore_index=True)
+    else:
+        df = pd.read_excel(path, sheet_name=xls.sheet_names[0])
+        if "Unnamed: 0" in df.columns and "Problema" not in df.columns:
+            df = df.rename(columns={"Unnamed: 0": "Problema"})
+        for col in expected:
+            if col not in df.columns:
+                df[col] = np.nan
+        df = df[expected].copy()
 
     # Basic cleaning
     for col in ["Sursa", "Problema", "Pasii de rezolvare", "Raspunsul", "Tema"]:
@@ -192,13 +204,21 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_processed_dataset(path: str | Path | None = None, save: bool = True) -> pd.DataFrame:
-    df = load_exercises(path)
+def build_processed_dataset(path: str | Path | None = None, save: bool = True, output_name: str | None = None) -> pd.DataFrame:
+    source_path = Path(path) if path is not None else DEFAULT_RAW_PATH
+    df = load_exercises(source_path)
     df = engineer_features(df)
     if save:
         PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-        df.to_csv(PROCESSED_DIR / "exercises_processed.csv", index=False)
+        target_name = output_name
+        if target_name is None:
+            target_name = "exercises_augmented.csv" if source_path.name.lower().startswith("exercises_augmented") else "exercises_processed.csv"
+        df.to_csv(PROCESSED_DIR / target_name, index=False)
     return df
+
+
+def build_augmented_dataset(save: bool = True) -> pd.DataFrame:
+    return build_processed_dataset(path=AUGMENTED_RAW_PATH, save=save, output_name="exercises_augmented.csv")
 
 
 if __name__ == "__main__":

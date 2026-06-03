@@ -8,7 +8,13 @@ import pandas as pd
 import streamlit as st
 
 from src.data_prep import engineer_features
-from src.model_utils import load_assets, prepare_single_problem, predict_domain_from_text, predict_structured_difficulty
+from src.model_utils import (
+    load_assets,
+    prepare_single_problem,
+    predict_domain_from_text,
+    predict_structured_difficulty,
+    resolve_dataset_path,
+)
 from src.pedagogical_engine import (
     METACOGNITIVE_QUESTIONS,
     choose_hint,
@@ -49,9 +55,22 @@ def cached_assets():
         ROOT / "models" / "structured_difficulty_model.joblib",
         ROOT / "models" / "unstructured_domain_model.joblib",
         ROOT / "models" / "evaluation_report.json",
-        ROOT / "data" / "processed" / "exercises_processed.csv",
+        ROOT / "data" / "processed" / "exercises_augmented.csv",
     ]
+    dataset_path = resolve_dataset_path()
+    report_path = ROOT / "models" / "evaluation_report.json"
+
+    should_refresh = False
     if not all(p.exists() for p in required):
+        should_refresh = True
+    else:
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            should_refresh = int(report.get("dataset", {}).get("rows_total", 0)) != len(pd.read_csv(dataset_path))
+        except Exception:
+            should_refresh = True
+
+    if should_refresh:
         train_all()
     return load_assets()
 

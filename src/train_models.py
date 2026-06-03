@@ -35,9 +35,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 try:
-    from .data_prep import build_processed_dataset
+    from .data_prep import AUGMENTED_RAW_PATH, build_augmented_dataset, build_processed_dataset
 except ImportError:  # allows running as: python src/train_models.py
-    from data_prep import build_processed_dataset
+    from data_prep import AUGMENTED_RAW_PATH, build_augmented_dataset, build_processed_dataset
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
@@ -289,7 +289,10 @@ def train_all() -> Dict:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
-    data = build_processed_dataset(save=True)
+    # Always refresh the legacy CSV and the augmented workbook output so both paths are available.
+    build_processed_dataset(save=True)
+    augmented_data = build_augmented_dataset(save=True)
+    data = augmented_data if not augmented_data.empty else build_processed_dataset(save=True)
     structured_model, structured_report = train_structured(data)
     unstructured_model, unstructured_report = train_unstructured(data)
 
