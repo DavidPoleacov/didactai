@@ -2,6 +2,20 @@
 
 Didact AI este un MVP pentru Olimpiada Națională de Inteligență Artificială: o aplicație Streamlit care ajută elevul să exerseze matematică fără să primească automat soluția completă. Sistemul combină reguli pedagogice controlabile cu două servicii ML reale și demonstrabile.
 
+Quick Docker (Python 3.11 + TensorFlow)
+-------------------------------------
+This repository includes a Dockerfile that builds on `python:3.11-slim` and installs `requirements.txt` (including `tensorflow-cpu`). To build and run the app locally in Docker:
+
+```bash
+./run_docker.sh
+# then open http://localhost:8501
+```
+
+Notes:
+- The Docker image uses Python 3.11 to ensure TensorFlow CPU wheels are available.
+- If the package installation fails inside Docker, check the build output; common causes are unavailable TF wheels for the platform or missing system libraries. If that happens, try the lightweight requirements (`requirements-light.txt`) which omit TensorFlow.
+
+
 ## Decizia despre dataset
 
 Datasetul furnizat este **utilizabil pentru o demonstrație competitivă**, dar nu este încă suficient pentru producție. Are 489 exerciții, 477 rânduri cu temă + dificultate, 51 duplicate exacte și 12 rânduri fără etichete. Nu recomand înlocuirea lui acum, pentru că este în limba română, este aliniat la matematica de examen și conține exact câmpurile necesare pentru cele două servicii ML: textul problemei, tema și dificultatea. Pentru versiunea următoare, cel mai bun dataset ar fi o colecție extinsă din arhive oficiale + etichetare profesorală pentru competențe și erori conceptuale.

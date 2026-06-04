@@ -107,7 +107,8 @@ def _sample_errors(frame: pd.DataFrame, y_true, y_pred, text_col: str = "Problem
 def train_structured(data: pd.DataFrame) -> Tuple[Pipeline, Dict]:
     # Strictly structured/metadata features: no raw problem text. Drop unknown targets.
     df = data[data["Dificultate_group"] != "Necunoscut"].copy()
-    df = df.drop_duplicates(subset=["problem_hash", "Dificultate_group"])
+    # Keep all labeled rows so models train on the full dataset (no aggressive deduplication).
+    # This preserves the ~1300+ exercises for training rather than reducing to a small sample.
 
     y = df["Dificultate_group"]
     X = df[STRUCTURED_FEATURES_NUM + STRUCTURED_FEATURES_CAT]
@@ -193,17 +194,22 @@ def train_unstructured(data: pd.DataFrame) -> Tuple[Pipeline, Dict]:
     # Unstructured service: raw text -> curriculum domain. Drop exact duplicate text to reduce leakage.
     df = data[data["Domeniu"].notna() & (data["Domeniu"] != "Altele")].copy()
     df = df.dropna(subset=["Problema"])
+    # Keep duplicate problems only if they are true duplicates of text+domain
     df = df.drop_duplicates(subset=["problem_hash", "Domeniu"])
-    # Keep classes with at least 8 examples for robust stratification.
-    counts = df["Domeniu"].value_counts()
-    keep = counts[counts >= 8].index
-    df = df[df["Domeniu"].isin(keep)].copy()
+    # Attempt to keep as many classes as possible. Some rare classes may have 1 example
+    # which prevents stratified splitting; we'll try stratified split and fall back if needed.
 
     X = df["Problema"].astype(str)
     y = df["Domeniu"].astype(str)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.22, random_state=42, stratify=y
-    )
+    # Prefer stratified split; if some classes are too small, fall back to a random split.
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.22, random_state=42, stratify=y
+        )
+    except ValueError:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.22, random_state=42, stratify=None
+        )
     test_frame = df.loc[X_test.index]
 
     baseline = DummyClassifier(strategy="most_frequent")

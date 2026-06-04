@@ -229,7 +229,11 @@ def recommend_next_exercise(
     target_difficulty: str,
     exclude_problem: str | None = None,
     random_state: int = 42,
-) -> Dict:
+) -> pd.DataFrame:
+    """Return a single-row DataFrame with the recommended exercise, or an empty DataFrame.
+
+    Returning a DataFrame keeps the return type consistent for callers in the Streamlit app.
+    """
     candidates = data.copy()
     if domain:
         same = candidates[candidates["Domeniu"] == domain]
@@ -241,9 +245,8 @@ def recommend_next_exercise(
     if len(exact) > 0:
         candidates = exact
     if len(candidates) == 0:
-        return {}
-    row = candidates.sample(1, random_state=random_state).iloc[0]
-    return row.to_dict()
+        return candidates.head(0)
+    return candidates.sample(1, random_state=random_state)
 
 
 def next_review_date(mastery: float, correct: bool) -> str:

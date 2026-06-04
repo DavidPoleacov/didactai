@@ -152,11 +152,12 @@ def render_tutor_exercise(row: dict, exercise_idx: int, key_prefix: str) -> None
         st.write(f"**Intervenție pedagogică:** {learning_state['intervention']}")
         st.write(f"**Noua probabilitate de stăpânire:** {new_mastery:.2f}")
         st.write(f"**Reactivare spaced repetition:** {next_review_date(new_mastery, result['correct'])}")
-        if next_row:
+        if next_row is not None and not getattr(next_row, "empty", True):
+            nr = next_row.iloc[0]
             st.markdown("#### Recomandarea următoare")
             st.write(f"Țintă: **{target}**, domeniu: **{row['Domeniu']}**")
-            st.markdown(f"<div class='main-card'>{next_row['Problema']}</div>", unsafe_allow_html=True)
-            st.caption(f"{next_row.get('Tema_norm', '—')} · {next_row.get('Dificultate_group', '—')}")
+            st.markdown(f"<div class='main-card'>{nr['Problema']}</div>", unsafe_allow_html=True)
+            st.caption(f"{nr.get('Tema_norm', '—')} · {nr.get('Dificultate_group', '—')}")
 
 
 # Fix dtypes after CSV load.
@@ -261,14 +262,14 @@ if st.session_state.diagnostic_results:
     if profile.get("weak_domains"):
         weak_domain = profile["weak_domains"][0]
         rec = recommend_next_exercise(data, weak_domain, "2 - mediu", random_state=11)
-        if rec:
+        if rec is not None and not getattr(rec, "empty", True):
             st.markdown("### Exercițiul de început recomandat")
             st.markdown(f"Tema prioritară: **{weak_domain}**")
             try:
-                exercise_idx = int(rec.get("Itemul", 0)) if pd.notna(rec.get("Itemul")) else 0
+                exercise_idx = int(rec.iloc[0].get("Itemul", 0)) if pd.notna(rec.iloc[0].get("Itemul")) else 0
             except (TypeError, ValueError, OverflowError):
                 exercise_idx = 0
-            render_tutor_exercise(rec, exercise_idx=exercise_idx, key_prefix="diag_followup")
+            render_tutor_exercise(rec.iloc[0].to_dict(), exercise_idx=exercise_idx, key_prefix="diag_followup")
 
 st.markdown("---")
 
@@ -508,7 +509,7 @@ with tabs[0]:
 
 with tabs[1]:
     st.header("🤖 Tutor AI - Rezolvă exerciții și progresează")
-    st.markdown("Sistemul urmărește automat progresul tău prin rețeaua neurală. Pur și simplu rezolvă exercițiile și vei vedea feedback intel igent.")
+    st.markdown("Sistemul urmărește automat progresul tău prin rețeaua neurală. Pur și simplu rezolvă exercițiile și vei vedea feedback inteligent.")
     
     if not st.session_state.neural_available:
         st.warning("⚠️ Modelul neural nu este disponibil - vei folosi feedback bazat pe reguli pedagogice, ceea ce funcționează perfect bine!")
