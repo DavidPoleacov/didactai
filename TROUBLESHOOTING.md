@@ -31,8 +31,8 @@ Streamlit Cloud couldn't install your Python packages during deployment. This is
 - Edit the deployment settings
 - Change "App file" section → "Python requires" 
 - Use `requirements-light.txt` instead of `requirements.txt`
-- This removes TensorFlow but app still works perfectly with rule-based recommendations
-- Takes 1-2 minutes to deploy instead of 5-10
+- This omits the optional neural learner-state model; rule-based tutoring and the scikit-learn classifiers remain available.
+- Installation time depends on the deployment environment and package cache.
 
 **Solution 2: Wait Longer**
 - TensorFlow might just need more time
@@ -41,10 +41,7 @@ Streamlit Cloud couldn't install your Python packages during deployment. This is
 #### Issue: Package version conflict
 **Signal:** Log shows "pip's dependency resolver" errors
 
-**Solution:** Already fixed in the latest `requirements.txt` (pinned versions)
-- Make sure you've pulled the latest version
-- Push any changes: `git push`
-- Streamlit Cloud auto-detects and rebuilds
+**Check:** The requirement files specify minimum version ranges; they are not an exact lock. Confirm the Python version and resolved packages, especially when loading saved scikit-learn models. The checked-in joblib artifacts were saved with scikit-learn 1.9.0; loading them under 1.9.1 emits compatibility warnings.
 
 #### Issue: Git synchronization lag
 **Signal:** You pushed changes but old version still deploys
@@ -64,12 +61,12 @@ If TensorFlow available:
   ✓ Adaptive difficulty recommendations
 
 If TensorFlow NOT available:
-  ✓ Rule-based pedagogical feedback
-  ✓ Scikit-learn models (always available)
-  ✓ Same tutoring experience, slightly less advanced
+   ✓ Rule-based pedagogical feedback
+   ✓ Scikit-learn classifiers
+   - Neural learner-state prediction is unavailable
 ```
 
-Both paths work equally well for students!
+The lightweight and TensorFlow-enabled paths expose different functionality. The neural prediction is optional and does not measure learning outcomes.
 
 ### Step-by-Step Deployment Fix
 

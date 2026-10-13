@@ -1,6 +1,16 @@
-# Raport model Didact AI
+# Model Evaluation Notes
 
-## Dataset
+> The detailed metrics below are a historical snapshot for the 489-row legacy dataset. They are not the metrics of the saved models in this checkout, and their original machine-readable report is not present. Use the current saved reports and figures in the section below when describing this repository.
+
+## Current Checked-In Reports
+
+The checked-in `models/evaluation_report.json` describes `data/processed/exercises_augmented.csv` (1,344 rows). The structured model uses 1,344 rows with 1,048 train and 296 test rows; its baseline/model macro-F1 are 0.1629/0.8312 and model accuracy is 0.9223. The text model filters the set to 1,265 rows, then uses 986 train and 279 test rows; its baseline/model macro-F1 are 0.0778/0.9743 and model accuracy is 0.9821.
+
+`models/neural_student_state_report.json` describes 2,200 synthetic, rule-labeled rows (1,760 train and 440 test); its accuracy is 0.9227 and macro-F1 is 0.9140. These are scores against generated labels, not measurements of student learning.
+
+## Historical Legacy Report
+
+### Legacy dataset
 
 {
   "rows_total": 489,

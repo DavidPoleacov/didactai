@@ -1,4 +1,6 @@
-# Didact AI - răspunsuri pregătite pentru juriu
+# Historical Competition Q&A Notes
+
+> Archived Romanian-language preparation notes. They contain time-specific claims and metrics from an earlier project snapshot, and are not verified descriptions of the current app or proof of what was present during the competition. For the current implementation and checked-in metric sources, use `README.md`, `README.ro.md`, and `docs/maker_portfolio_notes.md`. Confirm all historical claims with the authors before reusing them.
 
 ## 1. Problema și relevanța
 

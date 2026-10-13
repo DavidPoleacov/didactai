@@ -6,10 +6,11 @@ tutor remains safe, explainable, and not a black-box answer machine.
 """
 from __future__ import annotations
 
-import math
 import re
 import unicodedata
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
@@ -29,54 +30,143 @@ def normalize_answer(text: str) -> str:
     text = "" if text is None else str(text)
     text = unicodedata.normalize("NFD", text)
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
-    text = text.lower()
+    text = text.casefold()
     text = text.replace("−", "-").replace("–", "-").replace("—", "-")
-    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s*([=/*^])\s*", r"\1", text)
     return text
 
 
-def extract_numbers(text: str) -> List[str]:
-    return re.findall(r"-?\d+(?:[\.,/]\d+)?", normalize_answer(text))
+_INTEGER_PATTERN = r"[+-]?\d+"
+_DECIMAL_PATTERN = r"[+-]?(?:\d+[.,]\d*|[.,]\d+)"
+_NUMBER_AT_START = re.compile(rf"^(?P<number>{_INTEGER_PATTERN}/{_INTEGER_PATTERN}|{_DECIMAL_PATTERN}|{_INTEGER_PATTERN})")
+_FRACTION_PATTERN = re.compile(rf"^{_INTEGER_PATTERN}/{_INTEGER_PATTERN}$")
+_DECIMAL_FULL_PATTERN = re.compile(rf"^{_DECIMAL_PATTERN}$")
+_LABEL_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_NUMERIC_LIKE_PATTERN = re.compile(r"^[+\-\d/.,]+$")
+_KNOWN_UNITS = {
+    "%", "°", "ani", "baieti", "cm", "cm^2", "cm^3", "cm²", "cm³",
+    "g", "kg", "km", "l", "lei", "m", "m^2", "m^3", "m²", "m³",
+    "minute", "punct", "puncte", "pungi", "zile", "mii lei",
+}
+
+
+def _answer_text(value) -> str | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+def _parse_rational(value: str) -> Fraction | None:
+    if _FRACTION_PATTERN.fullmatch(value):
+        numerator, denominator = value.split("/", maxsplit=1)
+        denominator_value = int(denominator)
+        if denominator_value == 0:
+            return None
+        return Fraction(int(numerator), denominator_value)
+    if _DECIMAL_FULL_PATTERN.fullmatch(value):
+        try:
+            return Fraction(Decimal(value.replace(",", ".")))
+        except InvalidOperation:
+            return None
+    if re.fullmatch(_INTEGER_PATTERN, value):
+        return Fraction(int(value), 1)
+    return None
+
+
+def _parse_scalar(value: str) -> tuple[str | None, Fraction, str] | None:
+    label = None
+    scalar = value
+    if "=" in scalar:
+        if scalar.count("=") != 1:
+            return None
+        label, scalar = scalar.split("=", maxsplit=1)
+        if not _LABEL_PATTERN.fullmatch(label):
+            return None
+
+    match = _NUMBER_AT_START.match(scalar)
+    if not match:
+        return None
+    numeric_part = match.group("number")
+    rational = _parse_rational(numeric_part)
+    if rational is None:
+        return None
+    unit = scalar[match.end():].strip()
+    if unit and unit not in _KNOWN_UNITS:
+        return None
+    return label, rational, unit
+
+
+def _looks_like_numeric_key(value: str) -> bool:
+    scalar = value
+    if "=" in value:
+        if value.count("=") != 1:
+            return False
+        label, scalar = value.split("=", maxsplit=1)
+        if not _LABEL_PATTERN.fullmatch(label):
+            return False
+    return bool(_NUMERIC_LIKE_PATTERN.fullmatch(scalar))
+
+
+def answer_result_is_verified(result: Dict) -> bool:
+    """Return whether an answer result is a definite correct/incorrect verdict."""
+    return result.get("status") in {"correct", "incorrect"}
 
 
 def evaluate_answer(student_answer: str, expected_answer: str) -> Dict:
-    """Lightweight answer check for demo purposes.
+    """Conservatively compare complete answers without evaluating student input.
 
-    It is deliberately transparent: exact normalized match, containment, or overlap
-    of numeric tokens. It does not pretend to be a full symbolic mathematics grader.
+    Exact normalized text and exact rational scalar equivalence are supported.
+    Labels and units must match. General symbolic equivalence, unit conversion,
+    sets, intervals, and multi-part answers require review unless text matches exactly.
     """
-    s = normalize_answer(student_answer)
-    e = normalize_answer(expected_answer)
-    student_nums = set(extract_numbers(student_answer))
-    expected_nums = set(extract_numbers(expected_answer))
+    student_text = _answer_text(student_answer)
+    expected_text = _answer_text(expected_answer)
+    student = normalize_answer(student_text or "")
+    expected = normalize_answer(expected_text or "")
 
-    if not s:
+    status = "needs_review"
+    if expected_text is None or not expected:
+        status = "invalid_key"
+        feedback = "Cheia de răspuns lipsește sau este goală; acest răspuns nu poate fi evaluat."
+    elif not student:
         status = "no_answer"
-        correct = False
         feedback = "Nu ai introdus încă un răspuns. Începe cu ce se cere și cu datele cunoscute."
-    elif s == e or (len(e) > 0 and (s in e or e in s)):
-        status = "correct"
-        correct = True
-        feedback = "Răspunsul se potrivește cu cheia. Acum justifică metoda, nu doar rezultatul."
-    elif expected_nums and expected_nums.issubset(student_nums):
-        status = "probably_correct_format_differs"
-        correct = True
-        feedback = "Valorile numerice principale coincid. Verifică forma finală și unitățile."
-    elif student_nums & expected_nums:
-        status = "partial_numeric_overlap"
-        correct = False
-        feedback = "Ai unele valori corecte, dar rezultatul final nu este complet. Verifică semnele, operațiile și unitățile."
     else:
-        status = "incorrect"
-        correct = False
-        feedback = "Răspunsul nu coincide. Nu îți dau soluția completă: verifică primul pas și alege următorul indiciu."
+        expected_scalar = _parse_scalar(expected)
+        student_scalar = _parse_scalar(student)
+        if student == expected:
+            status = "correct"
+            feedback = "Răspunsul se potrivește cu cheia. Acum justifică metoda, nu doar rezultatul."
+        elif expected_scalar is None and _looks_like_numeric_key(expected):
+            status = "invalid_key"
+            feedback = "Cheia numerică nu este validă; acest răspuns nu poate fi evaluat."
+        elif expected_scalar is not None and student_scalar is not None:
+            expected_label, expected_value, expected_unit = expected_scalar
+            student_label, student_value, student_unit = student_scalar
+            if expected_label != student_label or expected_unit != student_unit:
+                feedback = "Verifică eticheta variabilei și unitățile; răspunsul necesită clarificare."
+            elif student_value == expected_value:
+                status = "correct"
+                feedback = "Răspunsul este numeric echivalent cu cheia. Acum justifică metoda."
+            else:
+                status = "incorrect"
+                feedback = "Răspunsul numeric nu coincide. Verifică semnele, operațiile și valoarea finală."
+        elif expected_scalar is not None and _looks_like_numeric_key(student):
+            feedback = "Răspunsul nu are un format numeric compatibil; este necesară verificarea manuală."
+        else:
+            feedback = "Răspunsul nu poate fi comparat în siguranță de verificator; este necesară verificarea manuală."
 
     return {
-        "correct": correct,
+        "correct": status == "correct",
+        "verified": status in {"correct", "incorrect"},
         "status": status,
         "feedback": feedback,
-        "student_numbers": sorted(student_nums),
-        "expected_numbers": sorted(expected_nums),
     }
 
 

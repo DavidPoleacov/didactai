@@ -259,5 +259,10 @@ def ensure_neural_model_exists() -> Dict:
     if tf is None or models is None or layers is None or EarlyStopping is None:
         return {"status": "unavailable", "reason": "TensorFlow runtime is not available in this environment."}
     if not (MODELS_DIR / "neural_student_state_model.keras").exists():
-        return train_neural_student_state_model()
+        report = train_neural_student_state_model()
+        return {
+            "status": "ready",
+            "model": str(MODELS_DIR / "neural_student_state_model.keras"),
+            "report": report,
+        }
     return {"status": "ready", "model": str(MODELS_DIR / "neural_student_state_model.keras")}
