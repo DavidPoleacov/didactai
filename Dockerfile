@@ -17,7 +17,7 @@ RUN apt-get update \
 WORKDIR /app
 
 # The default requirements install the lightweight app without TensorFlow.
-COPY requirements.txt ./requirements.txt
+COPY requirements.txt requirements-light.txt ./
 RUN pip install --upgrade pip setuptools wheel \
     && pip install --no-cache-dir -r requirements.txt
 

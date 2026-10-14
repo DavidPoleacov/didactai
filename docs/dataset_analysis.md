@@ -9,7 +9,11 @@
 - 42 source-derived problems with missing context, malformed/incorrect keys, incomplete tasks, or proof/diagram limitations.
 - 17 ambiguous generated savings questions.
 
-If the CSV remains unchanged, 1,344 − 59 = **1,285 available practice exercises**. `src/exercise_bank.py` applies the flags while preserving original DataFrame indices for classifier feature lookup and tracked Tutor history. The `row_id` values in the flags record audit provenance only.
+If the CSV remains unchanged, 1,344 − 59 = **1,285 content-eligible browsing rows**. `src/exercise_bank.py` applies the flags while preserving original DataFrame indices for classifier feature lookup and tracked Tutor history. The `row_id` values in the flags record audit provenance only.
+
+Tutor practice, diagnostic questions, and recommendations apply a separate runtime eligibility test: the existing conservative checker must return `correct` when a stored key is compared with itself. On the unchanged dataset, that derives **1,270 automatically gradable rows** and **15 browsing/manual-review rows** at stable source indices 24, 89, 90, 93, 98, 100, 101, 108, 111, 361, 382, 392, 406, 412, and 427. These are checker-format limitations (including radical, multipart, unfamiliar-unit, and explanatory-parenthesis formats), not findings that the underlying mathematics is incorrect. No keys or source rows are rewritten, and the indices are not hardcoded as the runtime filter.
+
+The exercise-population plots in `assets/` continue to describe the 1,285 content-eligible browsing rows; they do not describe the 1,270 automatically gradable subset. This repair does not regenerate those figures because their plotted population is unchanged.
 
 These flags capture identified review limitations. They are not a claim that remaining items were comprehensively verified by teachers. No source answer key is invented or repaired by the loader. The raw workbooks, processed training CSVs, saved models, and original evaluation reports remain training/evaluation artifacts and are not rewritten by normal app use.
 

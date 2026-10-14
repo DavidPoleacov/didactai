@@ -1,11 +1,11 @@
 # DidactAI
 
-DidactAI is an open-source Romanian-language mathematics tutoring prototype built with Streamlit. It combines a curated-for-practice exercise subset, predefined hints, rule-based feedback, and two saved exercise classifiers. It is intended for experimentation and learning, not as a replacement for a teacher.
+DidactAI is an open-source Romanian-language mathematics tutoring prototype built with Streamlit. It combines a content-filtered exercise bank for browsing, a checker-compatible subset for automatically scored practice, predefined hints, rule-based feedback, and two saved exercise classifiers. It is intended for experimentation and learning, not as a replacement for a teacher.
 
 ## Capabilities
 
 - Explore problems by domain and topic in Home. Home interactions are **simulations** and do not change Tutor progress.
-- Practise a selected exercise in Tutor AI, request staged stored hints, receive conservative answer feedback, and see a same-domain suggestion after a verified correct answer.
+- Practise an automatically gradable exercise in Tutor AI, request staged stored hints, receive conservative answer feedback, and see a same-domain suggestion after a verified correct answer.
 - Review verified Tutor attempts, approximate rule-based mastery, and session-only history in Progress.
 - Complete a short diagnostic. Only definite correct/incorrect answers contribute to its domain scores; it is separate from tracked Tutor history.
 - Classify exercise domain from problem text and exercise difficulty from structured metadata.
@@ -45,22 +45,22 @@ For an optional TensorFlow inference installation, use `requirements-neural.txt`
 
 ## How the interface works
 
-- **Home:** filter the practice bank and view domain/difficulty predictions. Answering, hinting, and recommendations here are labeled simulations and never write to Tutor tracking.
-- **Tutor AI:** choose a domain and a bank exercise or ask for an automatic choice. Definite wrong and correct answers count as separate attempts. Unverified comparisons do not update progress. A correct completed attempt cannot be credited twice.
+- **Home:** browse all content-eligible exercises and view domain/difficulty predictions. Fifteen checker-incompatible answer formats remain available to inspect with a manual-review label. Simulated answers, hints, and recommendations never write to Tutor tracking.
+- **Tutor AI:** choose among automatically gradable exercises or ask for an automatic choice. Definite wrong and correct answers count as separate attempts. Unverified comparisons do not update progress. A correct completed attempt cannot be credited twice.
 - **Progress:** counts verified attempts and groups them by the exercise's actual domain. Completed distinct exercises are counted separately. The mastery value is a global approximate rule-based indicator, not a calibrated probability. History is held in the current Streamlit session and is not saved to an account. A displayed review date is only a suggestion; it is not scheduled and sends no reminder.
 
 ## Architecture and models
 
 - `app.py` contains the Streamlit interface and session-scoped Tutor workflow.
 - `src/exercise_bank.py` applies `data/processed/exercise_review_flags.csv` by normalized `problem_hash`, removes empty statements/keys, and preserves source indices for model features and history.
-- `src/pedagogical_engine.py` implements conservative scalar answer comparison, hint staging, diagnostic scoring, and simple recommendations.
+- `src/pedagogical_engine.py` implements conservative scalar answer comparison, the derived checker-compatible exercise subset, hint staging, diagnostic scoring, and simple recommendations.
 - A scikit-learn `RandomForestClassifier` predicts difficulty from metadata: source/item metadata, problem/solution/answer lengths, mathematical-symbol indicators, and categorical topic, known domain, and source type.
 - A TF-IDF/Complement Naive Bayes pipeline predicts domain from Romanian problem text.
 - An optional TensorFlow model classifies interactions in a synthetic learner-state dataset. It is not used in the lightweight installation and its labels are rule-generated, not real-student observations.
 
 ## Dataset and provenance
 
-`data/processed/exercises_augmented.csv` contains 1,344 training rows: 1,212 generated and 132 source-derived. The content-review flags exclude 59 audited problems by normalized problem text—42 source-derived items and 17 ambiguous generated savings items—leaving 1,285 practice rows when the bank is unchanged. These flags record known answer/content limitations; they do **not** mean that all remaining problems have received teacher review. `data/processed/exercises_processed.csv` is an older 489-row dataset retained for provenance, not the active bank. The neural interaction dataset contains 2,200 synthetic rows.
+`data/processed/exercises_augmented.csv` contains 1,344 original training rows: 1,212 generated and 132 source-derived. The content-review flags exclude 59 problems by normalized problem text—42 source-derived items and 17 ambiguous generated savings items—leaving 1,285 content-eligible rows for browsing. Applying the existing conservative answer checker to each stored key against itself derives 1,270 automatically gradable rows and 15 browsing/manual-review rows. This is a format-compatibility test, not evidence that the mathematics is correct or teacher-certified. The original CSV, flags, model features, saved models, and evaluation reports are unchanged. `data/processed/exercises_processed.csv` is an older 489-row dataset retained for provenance, not the active bank. The neural interaction dataset contains 2,200 synthetic rows.
 
 The saved classical holdout metrics are:
 
@@ -71,7 +71,7 @@ The saved classical holdout metrics are:
 
 The saved synthetic neural test split contains 440 rows and reports accuracy 0.922727 / macro-F1 0.914048. These are classification metrics, not learning-outcome measures. The exercise data contains related template families across a random row split; metrics may therefore reflect family overlap. External evaluation on independently collected and teacher-reviewed data is still needed. Audit prompts and stored keys without executing input expressions using `python tools/check_generated_math.py`; independently reproduce the saved classical holdouts with `python tools/verify_saved_models.py`.
 
-The active plots under `assets/` are regenerated from the current practice CSV and saved report by `python tools/refresh_figures.py`. Older charts, if present under `assets/legacy/`, are historical.
+The active exercise-population plots under `assets/` show the 1,285 content-eligible browsing rows by domain and labeled difficulty; they do not depict the 1,270 automatically gradable Tutor subset. The saved holdout chart shows model classification metrics, not the current practice-bank population. Regenerate these figures only with the explicit `python tools/refresh_figures.py` command. Older charts, if present under `assets/legacy/`, are historical.
 
 ## Testing and maintenance
 
@@ -87,7 +87,7 @@ Training utilities are explicit development operations and can overwrite process
 ## Current limitations
 
 - The checker supports exact normalized text and exact rational scalar equivalence with matching variable labels and units. It does not convert units or establish arbitrary symbolic equivalence, proofs, sets, intervals, or ambiguous prose.
-- Some bank content is incomplete, ambiguous, or missing diagrams. Exclusions are review flags, not a teacher-certification process for the whole bank.
+- Some bank content is incomplete, ambiguous, or missing diagrams. The 59 content exclusions and 15 checker-format exclusions are separate safeguards, not a teacher-certification process for the remaining bank.
 - Mastery/recommendations are simple rules; the optional neural model predicts synthetic interaction labels.
 - There are no saved accounts, persistent progress, automated reminders, reflection analysis, or measured real-student outcomes.
 - Model holdouts are internal random splits, not independent external evaluations.

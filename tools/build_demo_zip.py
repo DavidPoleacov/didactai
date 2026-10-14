@@ -31,6 +31,7 @@ def source_files() -> list[Path]:
             }
             if (
                 relative in EXCLUDED_FILES
+                or relative == "MANIFEST.sha256"
                 or is_env_file
                 or any(relative.endswith(suffix) for suffix in EXCLUDED_SUFFIXES)
             ):

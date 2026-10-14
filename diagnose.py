@@ -44,15 +44,21 @@ def run_diagnostics(include_neural: bool = False) -> int:
             import pandas as pd
 
             from src.exercise_bank import load_practice_bank
+            from src.pedagogical_engine import automatically_gradable_bank
             from src.model_utils import load_assets, predict_domain_from_text, predict_structured_difficulty
 
             structured, domain_model, source, report = load_assets()
             practice = load_practice_bank(
                 source, ROOT / "data/processed/exercise_review_flags.csv",
             )
-            if len(source) != 1344 or len(practice) != 1285:
-                print(f"INFO dataset rows: source={len(source)}, practice={len(practice)} (content differs from audited snapshot)")
-            sample = practice.loc[[practice.index[0]]]
+            automatically_gradable = automatically_gradable_bank(practice)
+            manual_review = practice.loc[~practice.index.isin(automatically_gradable.index)]
+            print(
+                f"INFO exercise rows: training={len(source):,}, content-eligible={len(practice):,}, "
+                f"automatically gradable={len(automatically_gradable):,}, "
+                f"manual-review formats={len(manual_review):,}"
+            )
+            sample = automatically_gradable.loc[[automatically_gradable.index[0]]]
             predict_domain_from_text(domain_model, str(sample.iloc[0]["Problema"]))
             feature_cols = [
                 "Itemul", "Sursa_year", "problem_chars", "problem_words", "steps_chars", "answer_chars",
@@ -62,7 +68,10 @@ def run_diagnostics(include_neural: bool = False) -> int:
             predict_structured_difficulty(structured, sample[feature_cols])
             if report.get("dataset", {}).get("rows_total") != len(source):
                 print("WARN saved training report row count differs from current source data")
-            print(f"PASS loaded saved classifiers and made sample inferences; practice rows={len(practice)}")
+            print(
+                "PASS loaded saved classifiers and made sample inferences; "
+                f"automatic practice rows={len(automatically_gradable):,}"
+            )
         except Exception as exc:
             failures.append(f"Required saved assets could not be used: {type(exc).__name__}: {exc}")
             print(f"FAIL {failures[-1]}")

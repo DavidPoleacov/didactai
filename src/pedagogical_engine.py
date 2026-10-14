@@ -225,6 +225,16 @@ def evaluate_answer(student_answer: str, expected_answer: str) -> Dict:
     }
 
 
+def automatically_gradable_bank(data: pd.DataFrame) -> pd.DataFrame:
+    """Keep rows whose stored key the conservative checker can verify against itself."""
+    if "Raspunsul" not in data.columns:
+        return data.iloc[0:0].copy()
+    eligible = data["Raspunsul"].map(
+        lambda answer: evaluate_answer(answer, answer)["status"] == "correct"
+    )
+    return data.loc[eligible].copy()
+
+
 def split_solution_steps(solution: str) -> List[str]:
     text = "" if solution is None or pd.isna(solution) else str(solution).strip()
     if not text:
@@ -314,7 +324,7 @@ def generate_diagnostic_bank(data: pd.DataFrame, n_questions: int = 5, random_st
     """Build a varied diagnostic set from sensible, non-empty exercise rows."""
     if n_questions <= 0 or data.empty:
         return []
-    candidates = data.copy()
+    candidates = automatically_gradable_bank(data)
     candidates = candidates[candidates["Domeniu"].notna() & (candidates["Domeniu"] != "Altele")]
     valid_markers = {"nan", "none", "null", "<na>"}
     problem_text = candidates["Problema"].fillna("").astype(str).str.strip()
@@ -354,9 +364,11 @@ def assess_diagnostic_results(responses: List[Dict], data: pd.DataFrame) -> Dict
     if not responses:
         return {"weak_domains": [], "domain_scores": {}, "recommended_themes": []}
 
+    eligible_data = automatically_gradable_bank(data)
     scores = {}
-    for domain in sorted(data["Domeniu"].dropna().unique().tolist()):
-        scores[domain] = {"correct": 0, "total": 0}
+    if "Domeniu" in eligible_data:
+        for domain in sorted(eligible_data["Domeniu"].dropna().unique().tolist()):
+            scores[domain] = {"correct": 0, "total": 0}
 
     for item in responses:
         domain = item.get("domain") or item.get("Domeniu") or "Alt"
@@ -395,7 +407,11 @@ def assess_diagnostic_results(responses: List[Dict], data: pd.DataFrame) -> Dict
 
     recommended_themes = []
     for domain in weak_domains[:3]:
-        theme_pool = data[(data["Domeniu"] == domain) & (data["Tema_norm"].notna())].copy()
+        if not {"Domeniu", "Tema_norm"}.issubset(eligible_data.columns):
+            continue
+        theme_pool = eligible_data[
+            (eligible_data["Domeniu"] == domain) & (eligible_data["Tema_norm"].notna())
+        ].copy()
         if len(theme_pool):
             theme_pool = theme_pool.sort_values(["Dificultate", "problem_words"], ascending=[True, True])
             recommended_themes.append({"domain": domain, "themes": theme_pool["Tema_norm"].dropna().unique().tolist()[:5]})
@@ -418,7 +434,7 @@ def recommend_next_exercise(
 
     Returning a DataFrame keeps the return type consistent for callers in the Streamlit app.
     """
-    candidates = data.copy()
+    candidates = automatically_gradable_bank(data)
     if "problem_hash" in candidates.columns:
         review_flags = Path(__file__).resolve().parents[1] / "data" / "processed" / "exercise_review_flags.csv"
         excluded_hashes = load_review_flag_hashes(review_flags)

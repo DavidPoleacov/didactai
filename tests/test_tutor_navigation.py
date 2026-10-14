@@ -8,6 +8,7 @@ from streamlit.testing.v1 import AppTest
 from src.exercise_bank import load_practice_bank
 from src.pedagogical_engine import (
     assess_diagnostic_results,
+    automatically_gradable_bank,
     evaluate_answer,
     generate_diagnostic_bank,
     recommend_next_exercise,
@@ -25,17 +26,40 @@ class TutorNavigationTests(unittest.TestCase):
             pd.read_csv(ROOT / "data/processed/exercises_augmented.csv"),
             ROOT / "data/processed/exercise_review_flags.csv",
         )
+        practice = automatically_gradable_bank(practice)
         functions = practice[practice["Domeniu"] == "Funcții"]
         explicitly_selected = int(functions.index[1])
-        selector_key = "tutor_exercise_choice_Funcții"
+        selector_key = "tutor_exercise_choice_Funcții_0"
         app.selectbox(key=selector_key).set_value(explicitly_selected).run()
         app.button(key="start_selected").click().run()
         self.assertEqual(app.session_state["selected_exercise_idx"], explicitly_selected)
 
         app.button(key="start_automatic").click().run()
         selected = app.session_state["selected_exercise_idx"]
+        selector_key = f"tutor_exercise_choice_Funcții_{app.session_state['tutor_selection_generation']}"
         self.assertNotEqual(selected, explicitly_selected)
         self.assertEqual(practice.loc[selected, "Domeniu"], "Funcții")
+        self.assertEqual(app.selectbox(key=selector_key).value, selected)
+
+        other_domain = next(
+            domain for domain in sorted(practice["Domeniu"].unique()) if domain != "Funcții"
+        )
+        app.selectbox(key="tutor_domain").set_value(other_domain).run()
+        self.assertEqual(app.session_state["tutor_domain"], other_domain)
+        domain_selector_key = (
+            f"tutor_exercise_choice_{other_domain}_"
+            f"{app.session_state['tutor_selection_generation']}"
+        )
+        self.assertIsNotNone(app.selectbox(key=domain_selector_key))
+        app.selectbox(key="tutor_domain").set_value("Funcții").run()
+        function_selector = app.selectbox(key=selector_key)
+        self.assertIn(function_selector.value, functions.index)
+        manually_selected_after_domain_change = next(
+            int(index) for index in functions.index if int(index) != int(function_selector.value)
+        )
+        function_selector.set_value(manually_selected_after_domain_change).run()
+        app.button(key="start_selected").click().run()
+        self.assertEqual(app.session_state["selected_exercise_idx"], manually_selected_after_domain_change)
 
     def test_real_wrong_correct_continue_duplicate_guard_and_reset(self):
         app = AppTest.from_file(str(APP_PATH), default_timeout=120).run()
@@ -66,6 +90,18 @@ class TutorNavigationTests(unittest.TestCase):
         self.assertEqual(len(app.session_state["interaction_log"]), 1)
         self.assertEqual(app.session_state["tutor_latest_hint"]["shown_solution_steps"], 0)
 
+        before_unverified_submission = {
+            key: copy.deepcopy(app.session_state[key]) for key in (
+                "mastery", "current_exercise_attempt_count", "current_exercise_mistake_count",
+                "current_exercise_consecutive_errors", "interaction_log", "tutor_analysis",
+            )
+        }
+        app.text_area(key=answer_key).set_value("12 or 99")
+        app.button(key=submit_key).click().run()
+        self.assertEqual(app.session_state["tutor_feedback"]["status"], "needs_review")
+        for key, value in before_unverified_submission.items():
+            self.assertEqual(app.session_state[key], value, key)
+
         tracked_before_preview = {
             key: copy.deepcopy(app.session_state[key]) for key in (
                 "interaction_log", "mastery", "current_exercise_attempt_count",
@@ -80,7 +116,7 @@ class TutorNavigationTests(unittest.TestCase):
         app.button(key="home_preview_460_evaluate").click().run()
         for key, value in tracked_before_preview.items():
             self.assertEqual(app.session_state[key], value, key)
-        self.assertEqual(app.session_state["tutor_feedback"]["status"], "incorrect")
+        self.assertEqual(app.session_state["tutor_feedback"]["status"], "needs_review")
         self.assertIsNotNone(app.session_state["tutor_latest_hint"])
 
         app.text_area(key=answer_key).set_value("12")
@@ -116,7 +152,23 @@ class TutorNavigationTests(unittest.TestCase):
         self.assertEqual(app.session_state["selected_exercise_idx"], next_index)
         self.assertEqual(app.session_state["current_exercise_attempt_count"], 0)
         self.assertEqual(app.session_state["current_exercise_hint_count"], 0)
+        self.assertEqual(app.session_state["current_exercise_mistake_count"], 0)
+        self.assertEqual(app.session_state["current_exercise_consecutive_errors"], 0)
+        self.assertFalse(app.session_state["current_exercise_completed"])
+        self.assertIsNone(app.session_state["tutor_latest_hint"])
+        self.assertIsNone(app.session_state["tutor_analysis"])
+        self.assertIsNone(app.session_state["tutor_recommendation"])
         self.assertIsNone(app.session_state["tutor_feedback"])
+        self.assertEqual(len(app.session_state["interaction_log"]), 2)
+        selector_key = (
+            f"tutor_exercise_choice_Funcții_"
+            f"{app.session_state['tutor_selection_generation']}"
+        )
+        self.assertEqual(app.selectbox(key=selector_key).value, next_index)
+        app.button(key="start_selected").click().run()
+        self.assertEqual(app.session_state["selected_exercise_idx"], next_index)
+        self.assertEqual(app.selectbox(key=selector_key).value, next_index)
+        self.assertEqual(app.text_area(key=f"tutor_answer_{app.session_state['tutor_run_id']}_{next_index}").value, "")
         self.assertEqual(len(app.session_state["interaction_log"]), 2)
 
         app.button(key="reset_progress").click().run()
@@ -168,17 +220,25 @@ class TutorNavigationTests(unittest.TestCase):
 
         diagnostic_preview_question = app.session_state["diagnostic_results"]["weak_domains"][0]
         self.assertEqual(question["Domeniu"], diagnostic_preview_question)
+        supported_practice = automatically_gradable_bank(practice)
         recommended = recommend_next_exercise(
-            practice, diagnostic_preview_question, "2 - mediu", random_state=11,
+            supported_practice, diagnostic_preview_question, "2 - mediu", random_state=11,
         )
         preview_prefix = f"diagnostic_preview_7_{int(recommended.index[0])}"
         app.button(key=f"{preview_prefix}_hint_button").click().run()
         app.button(key=f"{preview_prefix}_hint_button").click().run()
         preview_hint_count = app.session_state[f"{preview_prefix}_hint_count"]
         self.assertEqual(preview_hint_count, 2)
-        app.text_input(key=f"{preview_prefix}_answer").set_value("12")
+        preview_answer = str(recommended.iloc[0]["Raspunsul"])
+        app.text_input(key=f"{preview_prefix}_answer").set_value(preview_answer)
         app.button(key=f"{preview_prefix}_evaluate").click().run()
         app.button(key=f"{preview_prefix}_evaluate").click().run()
+        self.assertIsNotNone(app.session_state.get(f"{preview_prefix}_estimate"))
+        app.text_input(key=f"{preview_prefix}_answer").set_value(f"{preview_answer} or 99")
+        app.button(key=f"{preview_prefix}_evaluate").click().run()
+        self.assertEqual(app.session_state[f"{preview_prefix}_feedback"]["status"], "needs_review")
+        self.assertNotIn(f"{preview_prefix}_estimate", app.session_state)
+        self.assertNotIn(f"{preview_prefix}_next", app.session_state)
         for key, value in tracked_before.items():
             self.assertEqual(app.session_state[key], value, key)
         old_generation = app.session_state["diagnostic_generation"]
@@ -188,11 +248,45 @@ class TutorNavigationTests(unittest.TestCase):
         self.assertIsNone(app.session_state["diagnostic_results"])
         self.assertNotIn(old_widget, app.session_state)
 
+    def test_home_preview_clears_estimate_and_recommendation_after_unverified_answer(self):
+        app = AppTest.from_file(str(APP_PATH), default_timeout=120).run()
+        prefix = "home_preview_460"
+        app.text_input(key=f"{prefix}_answer").set_value("12")
+        app.button(key=f"{prefix}_evaluate").click().run()
+        self.assertEqual(app.session_state[f"{prefix}_feedback"]["status"], "correct")
+        self.assertIsNotNone(app.session_state.get(f"{prefix}_estimate"))
+        self.assertIsNotNone(app.session_state.get(f"{prefix}_next"))
+
+        tracked_before = {
+            key: copy.deepcopy(app.session_state[key]) for key in (
+                "interaction_log", "mastery", "current_exercise_attempt_count",
+                "current_exercise_hint_count", "current_exercise_mistake_count",
+                "current_exercise_consecutive_errors", "current_exercise_completed",
+                "selected_exercise_idx", "tutor_feedback", "tutor_analysis",
+            )
+        }
+        app.text_input(key=f"{prefix}_answer").set_value("12 or 99")
+        app.button(key=f"{prefix}_evaluate").click().run()
+
+        self.assertEqual(app.session_state[f"{prefix}_feedback"]["status"], "needs_review")
+        self.assertNotIn(f"{prefix}_estimate", app.session_state)
+        self.assertNotIn(f"{prefix}_next", app.session_state)
+        for key, value in tracked_before.items():
+            self.assertEqual(app.session_state[key], value, key)
+
+        app.session_state[f"{prefix}_estimate"] = 0.73
+        app.session_state[f"{prefix}_next"] = {"Problema": "previous"}
+        app.text_input(key=f"{prefix}_answer").set_value("")
+        app.button(key=f"{prefix}_evaluate").click().run()
+        self.assertEqual(app.session_state[f"{prefix}_feedback"]["status"], "no_answer")
+        self.assertNotIn(f"{prefix}_estimate", app.session_state)
+        self.assertNotIn(f"{prefix}_next", app.session_state)
+
     def test_diagnostic_profile_function_used_by_app_exposes_unverified_separation(self):
-        bank = load_practice_bank(
+        bank = automatically_gradable_bank(load_practice_bank(
             pd.read_csv(ROOT / "data/processed/exercises_augmented.csv"),
             ROOT / "data/processed/exercise_review_flags.csv",
-        )
+        ))
         profile = assess_diagnostic_results(
             [{"domain": bank.iloc[0]["Domeniu"], "correct": False}],
             bank,

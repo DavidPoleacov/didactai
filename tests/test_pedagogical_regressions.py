@@ -3,8 +3,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.exercise_bank import load_practice_bank
 from src.pedagogical_engine import (
     assess_diagnostic_results,
+    automatically_gradable_bank,
     choose_hint,
     evaluate_answer,
     generate_diagnostic_bank,
@@ -68,6 +70,7 @@ class DiagnosticAndRecommendationRegressions(unittest.TestCase):
     def test_weakest_domain_first_and_untested_domains_are_explicit(self):
         data = pd.DataFrame({
             "Domeniu": ["A", "B", "C"], "Tema_norm": ["a", "b", "c"],
+            "Raspunsul": ["1", "2", "3"],
             "Dificultate": [1, 1, 1], "problem_words": [3, 3, 3],
         })
         profile = assess_diagnostic_results([
@@ -113,6 +116,40 @@ class DiagnosticAndRecommendationRegressions(unittest.TestCase):
         self.assertTrue(recommend_next_exercise(data, "A", "2", exclude_problem="a2").index.tolist())
         self.assertTrue(recommend_next_exercise(data, "B", "2", exclude_problem="b1").empty)
 
+    def test_unsupported_keys_are_excluded_from_diagnostics_and_recommendations(self):
+        data = pd.DataFrame([
+            {
+                "Domeniu": "A", "Problema": "supported", "Raspunsul": "12",
+                "Dificultate_group": "1", "Tema_norm": "scalar",
+                "Dificultate": 1, "problem_words": 2,
+            },
+            {
+                "Domeniu": "A", "Problema": "unsupported", "Raspunsul": "12 furlongs",
+                "Dificultate_group": "1", "Tema_norm": "radical",
+                "Dificultate": 1, "problem_words": 2,
+            },
+        ], index=[460, 24])
+
+        self.assertEqual(automatically_gradable_bank(data).index.tolist(), [460])
+        diagnostic = generate_diagnostic_bank(data, 10)
+        self.assertTrue(diagnostic)
+        self.assertEqual({item["Problema"] for item in diagnostic}, {"supported"})
+        recommendation = recommend_next_exercise(data, "A", "1")
+        self.assertEqual(recommendation.index.tolist(), [460])
+
+    def test_audited_dataset_supported_subset_counts_and_stable_indices(self):
+        root = Path(__file__).resolve().parents[1]
+        source = pd.read_csv(root / "data/processed/exercises_augmented.csv")
+        content = load_practice_bank(source, root / "data/processed/exercise_review_flags.csv")
+        automatic = automatically_gradable_bank(content)
+        browsing_only = content.loc[~content.index.isin(automatic.index)]
+
+        self.assertEqual((len(source), len(content), len(automatic), len(browsing_only)), (1344, 1285, 1270, 15))
+        self.assertIn(460, automatic.index)
+        self.assertTrue(
+            all(evaluate_answer(answer, answer)["status"] != "correct" for answer in browsing_only["Raspunsul"])
+        )
+
     def test_recommendation_excludes_flagged_hashes(self):
         root = Path(__file__).resolve().parents[1]
         raw = pd.read_csv(root / "data/processed/exercises_augmented.csv")
@@ -122,6 +159,14 @@ class DiagnosticAndRecommendationRegressions(unittest.TestCase):
             (raw["Domeniu"] == flagged.iloc[0]["Domeniu"])
             & ~raw["problem_hash"].isin(flags["problem_hash"])
         ].iloc[[0]]
+        eligible = automatically_gradable_bank(eligible)
+        if eligible.empty:
+            eligible = automatically_gradable_bank(
+                raw[
+                    (raw["Domeniu"] == flagged.iloc[0]["Domeniu"])
+                    & ~raw["problem_hash"].isin(flags["problem_hash"])
+                ]
+            ).iloc[[0]]
         candidate_pool = pd.concat([flagged, eligible])
 
         result = recommend_next_exercise(

@@ -12,6 +12,7 @@ from src.pedagogical_engine import (
     METACOGNITIVE_QUESTIONS,
     answer_result_is_verified,
     assess_diagnostic_results,
+    automatically_gradable_bank,
     choose_hint,
     diagnose_learning_state,
     evaluate_answer,
@@ -70,6 +71,7 @@ except Exception as exc:
 data = data.copy()
 for column in ("Dificultate", "Itemul", "Sursa_year"):
     data[column] = pd.to_numeric(data[column], errors="coerce")
+automatically_gradable_data = automatically_gradable_bank(data)
 
 try:
     from src import neural_student_state_model as neural_module
@@ -102,6 +104,7 @@ SESSION_DEFAULTS = {
     "current_exercise_completed": False,
     "selected_exercise_idx": None,
     "tutor_run_id": 0,
+    "tutor_selection_generation": 0,
     "tutor_latest_hint": None,
     "tutor_feedback": None,
     "tutor_analysis": None,
@@ -277,6 +280,9 @@ def render_preview(row: pd.Series, prefix: str) -> None:
             st.session_state[f"{prefix}_next"] = (
                 candidate.iloc[0].to_dict() if not candidate.empty else None
             )
+        else:
+            st.session_state.pop(f"{prefix}_estimate", None)
+            st.session_state.pop(f"{prefix}_next", None)
     feedback = st.session_state.get(f"{prefix}_feedback")
     if feedback:
         display_answer_feedback(feedback)
@@ -291,11 +297,15 @@ def render_preview(row: pd.Series, prefix: str) -> None:
 
 st.title("🧠 Didact AI")
 st.subheader("Un tutor de matematică clar și practic.")
-st.caption(f"Exerciții disponibile pentru practică: {len(data):,}. Întrebările de reflecție sunt prestabilite.")
-metrics = st.columns(3)
-metrics[0].metric("Exerciții disponibile", f"{len(data):,}")
-metrics[1].metric("Scor macro-F1 dificultate", f"{report['structured_model']['model']['macro_f1']:.3f}")
-metrics[2].metric("Scor macro-F1 domeniu", f"{report['unstructured_model']['model']['macro_f1']:.3f}")
+st.caption(
+    f"{len(data):,} exerciții pentru explorare; {len(automatically_gradable_data):,} "
+    "pot fi evaluate automat. Întrebările de reflecție sunt prestabilite."
+)
+metrics = st.columns(4)
+metrics[0].metric("Pentru explorare", f"{len(data):,}")
+metrics[1].metric("Gradabile automat", f"{len(automatically_gradable_data):,}")
+metrics[2].metric("Macro-F1 dificultate", f"{report['structured_model']['model']['macro_f1']:.3f}")
+metrics[3].metric("Macro-F1 domeniu", f"{report['unstructured_model']['model']['macro_f1']:.3f}")
 
 tabs = st.tabs(["🏠 Acasă", "🤖 Tutor AI", "📈 Progresul meu"])
 
@@ -326,6 +336,11 @@ with tabs[0]:
         st.markdown("### Problemă")
         st.write(home_row["Problema"])
         st.caption(f"{home_row['Domeniu']} · {home_row['Tema_norm']} · {home_row['Dificultate_group']}")
+        if home_idx not in automatically_gradable_data.index:
+            st.warning(
+                "Acest exercițiu este disponibil pentru explorare, dar formatul cheii nu "
+                "permite verificarea automată. Nu se poate înregistra un progres automat."
+            )
         left, right = st.columns(2)
         with left:
             render_preview(home_row, f"home_preview_{home_idx}")
@@ -348,7 +363,7 @@ with tabs[0]:
             st.session_state.diagnostic_generation += 1
             st.rerun()
     else:
-        quiz = generate_diagnostic_bank(data, 5, st.session_state.diagnostic_seed)
+        quiz = generate_diagnostic_bank(automatically_gradable_data, 5, st.session_state.diagnostic_seed)
         generation = st.session_state.diagnostic_generation
         if not quiz:
             st.info("Nu există suficiente exerciții eligibile pentru diagnostic.")
@@ -371,7 +386,9 @@ with tabs[0]:
                         st.caption(f"Răspunsul {number + 1}: neverificat.")
             if st.button("Finalizează diagnosticul", key="diagnostic_finish"):
                 if responses:
-                    st.session_state.diagnostic_results = assess_diagnostic_results(responses, data)
+                    st.session_state.diagnostic_results = assess_diagnostic_results(
+                        responses, automatically_gradable_data,
+                    )
                     st.rerun()
                 else:
                     st.warning("Nu există încă răspunsuri pe care verificatorul să le poată evalua.")
@@ -394,7 +411,9 @@ with tabs[0]:
         weak_domains = profile["weak_domains"]
         if weak_domains:
             st.write("Domenii cu scor observat mai mic: " + ", ".join(weak_domains[:3]))
-            recommended = recommend_next_exercise(data, weak_domains[0], "2 - mediu", random_state=11)
+            recommended = recommend_next_exercise(
+                automatically_gradable_data, weak_domains[0], "2 - mediu", random_state=11,
+            )
             if not recommended.empty:
                 st.write("Exercițiu sugerat pentru explorare:")
                 st.write(recommended.iloc[0]["Problema"])
@@ -413,113 +432,143 @@ with tabs[1]:
     if not neural_available:
         st.caption("Predicția neurală opțională nu este disponibilă; practica rulează fără TensorFlow.")
     tutor_domains = sorted(data["Domeniu"].dropna().unique().tolist())
-    preferred_domain = "Funcții" if "Funcții" in tutor_domains else tutor_domains[0]
-    st.selectbox("Alege domeniul", tutor_domains, index=tutor_domains.index(preferred_domain), key="tutor_domain")
-    domain_rows = data[data["Domeniu"] == st.session_state.tutor_domain]
-    active_index = st.session_state.selected_exercise_idx
-    if active_index is not None and active_index not in domain_rows.index:
-        st.session_state.selected_exercise_idx = None
-        reset_exercise_state()
-    if domain_rows.empty:
-        st.info("Nu există exerciții disponibile în acest domeniu.")
-    else:
-        active_index = st.session_state.selected_exercise_idx
-        if active_index is None:
-            active_index = 460 if 460 in domain_rows.index else int(domain_rows.index[0])
-        selected_index = st.selectbox(
-            "Alege un exercițiu", domain_rows.index.tolist(),
-            index=domain_rows.index.tolist().index(active_index),
-            format_func=formatted_exercise,
-            key=f"tutor_exercise_choice_{st.session_state.tutor_domain}",
+    gradable_domains = set(automatically_gradable_data["Domeniu"].dropna().unique().tolist())
+    if automatically_gradable_data.empty or not tutor_domains or not gradable_domains:
+        st.info(
+            "Nu există exerciții cu chei compatibile cu verificarea automată. "
+            "Poți explora banca în fila Acasă; controalele Tutorului nu sunt disponibile."
         )
-        action_cols = st.columns(2)
-        if action_cols[0].button("▶ Începe exercițiul selectat", type="primary", key="start_selected"):
-            st.session_state.selected_exercise_idx = int(selected_index)
+    else:
+        preferred_domain = (
+            "Funcții" if "Funcții" in gradable_domains
+            else next(domain for domain in tutor_domains if domain in gradable_domains)
+        )
+        if st.session_state.get("tutor_domain") not in tutor_domains:
+            st.session_state.tutor_domain = preferred_domain
+        st.selectbox("Alege domeniul", tutor_domains, key="tutor_domain")
+        domain_rows = automatically_gradable_data[
+            automatically_gradable_data["Domeniu"] == st.session_state.tutor_domain
+        ]
+        active_index = st.session_state.selected_exercise_idx
+        if active_index is not None and active_index not in domain_rows.index:
+            st.session_state.selected_exercise_idx = None
             reset_exercise_state()
-            st.rerun()
-        if action_cols[1].button("Alege automat", key="start_automatic"):
-            candidates = domain_rows.drop(index=active_index, errors="ignore")
-            if candidates.empty:
-                candidates = domain_rows
-            next_index = int(candidates.sample(1, random_state=len(st.session_state.interaction_log) + 42).index[0])
-            st.session_state.selected_exercise_idx = next_index
-            reset_exercise_state()
-            st.rerun()
-
-        exercise_index = st.session_state.selected_exercise_idx
-        if exercise_index is None or exercise_index not in data.index:
-            st.info("Alege un exercițiu pentru a începe practica.")
-        else:
-            current = data.loc[exercise_index]
-            st.divider()
-            st.subheader("Problemă")
-            st.write(current["Problema"])
-            st.caption(f"{current['Domeniu']} · {current['Tema_norm']} · {current['Dificultate_group']}")
-            st.caption(
-                f"Încercări verificate: {st.session_state.current_exercise_attempt_count} · "
-                f"indicii: {st.session_state.current_exercise_hint_count} · "
-                f"greșeli: {st.session_state.current_exercise_mistake_count} · "
-                f"erori consecutive: {st.session_state.current_exercise_consecutive_errors}"
+        if domain_rows.empty:
+            st.info(
+                "Nu există exerciții care pot fi evaluate automat în acest domeniu. "
+                "Alege un alt domeniu sau explorează exercițiile în fila Acasă."
             )
-            run_id = st.session_state.tutor_run_id
-            answer = st.text_area("Scrie răspunsul tău", key=f"tutor_answer_{run_id}_{exercise_index}")
-            st.info(METACOGNITIVE_QUESTIONS[(int(exercise_index) + st.session_state.current_exercise_hint_count) % len(METACOGNITIVE_QUESTIONS)])
-            hint_column, submit_column = st.columns(2)
-            with hint_column:
-                if st.button("💡 Cere un indiciu", key=f"tutor_hint_{run_id}", disabled=st.session_state.current_exercise_completed):
-                    st.session_state.current_exercise_hint_count += 1
-                    st.session_state.tutor_latest_hint = choose_hint(
-                        str(current["Problema"]), current.get("Pasii de rezolvare", ""),
-                        st.session_state.mastery, st.session_state.current_exercise_hint_count,
-                    )
-                    st.rerun()
-            if st.session_state.tutor_latest_hint:
-                st.info(st.session_state.tutor_latest_hint["hint"])
-                if st.session_state.tutor_latest_hint["shown_solution_steps"]:
-                    st.caption(f"Pași ai soluției afișați: {st.session_state.tutor_latest_hint['shown_solution_steps']}")
-            with submit_column:
-                if st.button(
-                    "✓ Verifică răspunsul", type="primary", key=f"tutor_submit_{run_id}",
-                    disabled=st.session_state.current_exercise_completed,
-                ):
-                    verdict = evaluate_answer(answer, current.get("Raspunsul"))
-                    st.session_state.tutor_feedback = verdict
-                    st.session_state.tutor_error = None
-                    if answer_result_is_verified(verdict):
-                        process_verified_tutor_answer(verdict, current, int(exercise_index))
-                    st.rerun()
+        else:
+            active_index = st.session_state.selected_exercise_idx
+            if active_index is None:
+                active_index = 460 if 460 in domain_rows.index else int(domain_rows.index[0])
+            selector_key = (
+                f"tutor_exercise_choice_{st.session_state.tutor_domain}_"
+                f"{st.session_state.tutor_selection_generation}"
+            )
+            selected_index = st.selectbox(
+                "Alege un exercițiu", domain_rows.index.tolist(),
+                index=domain_rows.index.tolist().index(active_index),
+                format_func=formatted_exercise,
+                key=selector_key,
+            )
+            action_cols = st.columns(2)
+            if action_cols[0].button("▶ Începe exercițiul selectat", type="primary", key="start_selected"):
+                st.session_state.selected_exercise_idx = int(selected_index)
+                reset_exercise_state()
+                st.rerun()
+            if action_cols[1].button("Alege automat", key="start_automatic"):
+                candidates = domain_rows.drop(index=selected_index, errors="ignore")
+                if candidates.empty:
+                    candidates = domain_rows
+                next_index = int(
+                    candidates.sample(1, random_state=len(st.session_state.interaction_log) + 42).index[0]
+                )
+                st.session_state.selected_exercise_idx = next_index
+                st.session_state.tutor_selection_generation += 1
+                reset_exercise_state()
+                st.rerun()
 
-            if st.session_state.tutor_feedback:
-                display_answer_feedback(st.session_state.tutor_feedback)
-            if st.session_state.tutor_error:
-                st.error(st.session_state.tutor_error)
-            analysis = st.session_state.tutor_analysis
-            if analysis:
-                with st.expander("Analiza răspunsului", expanded=True):
-                    st.write(f"Timp estimat în această problemă: {analysis['elapsed']} s")
-                    st.write(f"Domeniu clasificat din text: **{analysis['domain']}**")
-                    st.write(f"Dificultate estimată din metadate: **{analysis['difficulty']}**")
-                    st.write(f"Indicator rule-based, estimare aproximativă: **{analysis['mastery']:.2f}**")
-                    st.write(f"Feedback: {analysis['learning_state']['state']}. {analysis['learning_state']['intervention']}")
-                    st.caption(f"Dată orientativă de revizuire: {analysis['review_date']} (nu este salvată și nu trimite mementouri).")
-                    if analysis["neural"]:
-                        st.caption(f"Predicție neurală experimentală: {analysis['neural']['predicted_state']}")
-                    if analysis["neural_error"]:
-                        st.warning(analysis["neural_error"])
-
-            recommendation = st.session_state.tutor_recommendation
-            if st.session_state.current_exercise_completed:
-                if recommendation and recommendation["index"] in data.index:
-                    next_row = data.loc[recommendation["index"]]
-                    st.subheader("Următorul exercițiu sugerat")
-                    st.write(f"Țintă orientativă: {recommendation['target']} · domeniu: {next_row['Domeniu']}")
-                    st.write(next_row["Problema"])
-                    if st.button("Continuă cu exercițiul următor ➜", key=f"tutor_continue_{run_id}"):
-                        st.session_state.selected_exercise_idx = recommendation["index"]
-                        reset_exercise_state()
+            exercise_index = st.session_state.selected_exercise_idx
+            if exercise_index is None or exercise_index not in automatically_gradable_data.index:
+                st.info("Alege un exercițiu pentru a începe practica.")
+            else:
+                current = data.loc[exercise_index]
+                st.divider()
+                st.subheader("Problemă")
+                st.write(current["Problema"])
+                st.caption(f"{current['Domeniu']} · {current['Tema_norm']} · {current['Dificultate_group']}")
+                st.caption(
+                    f"Încercări verificate: {st.session_state.current_exercise_attempt_count} · "
+                    f"indicii: {st.session_state.current_exercise_hint_count} · "
+                    f"greșeli: {st.session_state.current_exercise_mistake_count} · "
+                    f"erori consecutive: {st.session_state.current_exercise_consecutive_errors}"
+                )
+                run_id = st.session_state.tutor_run_id
+                answer = st.text_area("Scrie răspunsul tău", key=f"tutor_answer_{run_id}_{exercise_index}")
+                st.info(METACOGNITIVE_QUESTIONS[(int(exercise_index) + st.session_state.current_exercise_hint_count) % len(METACOGNITIVE_QUESTIONS)])
+                hint_column, submit_column = st.columns(2)
+                with hint_column:
+                    if st.button("💡 Cere un indiciu", key=f"tutor_hint_{run_id}", disabled=st.session_state.current_exercise_completed):
+                        st.session_state.current_exercise_hint_count += 1
+                        st.session_state.tutor_latest_hint = choose_hint(
+                            str(current["Problema"]), current.get("Pasii de rezolvare", ""),
+                            st.session_state.mastery, st.session_state.current_exercise_hint_count,
+                        )
                         st.rerun()
-                else:
-                    st.info("Nu a rămas un alt exercițiu eligibil în acest domeniu.")
+                if st.session_state.tutor_latest_hint:
+                    st.info(st.session_state.tutor_latest_hint["hint"])
+                    if st.session_state.tutor_latest_hint["shown_solution_steps"]:
+                        st.caption(f"Pași ai soluției afișați: {st.session_state.tutor_latest_hint['shown_solution_steps']}")
+                with submit_column:
+                    if st.button(
+                        "✓ Verifică răspunsul", type="primary", key=f"tutor_submit_{run_id}",
+                        disabled=st.session_state.current_exercise_completed,
+                    ):
+                        verdict = evaluate_answer(answer, current.get("Raspunsul"))
+                        st.session_state.tutor_feedback = verdict
+                        st.session_state.tutor_error = None
+                        if answer_result_is_verified(verdict):
+                            process_verified_tutor_answer(verdict, current, int(exercise_index))
+                        st.rerun()
+
+                if st.session_state.tutor_feedback:
+                    display_answer_feedback(st.session_state.tutor_feedback)
+                if st.session_state.tutor_error:
+                    st.error(st.session_state.tutor_error)
+                analysis = st.session_state.tutor_analysis
+                if analysis:
+                    if (
+                        st.session_state.tutor_feedback
+                        and not answer_result_is_verified(st.session_state.tutor_feedback)
+                    ):
+                        st.caption("Analiza de mai jos aparține ultimei încercări verificate, nu răspunsului neverificat curent.")
+                    with st.expander("Analiza răspunsului", expanded=True):
+                        st.write(f"Timp estimat în această problemă: {analysis['elapsed']} s")
+                        st.write(f"Domeniu clasificat din text: **{analysis['domain']}**")
+                        st.write(f"Dificultate estimată din metadate: **{analysis['difficulty']}**")
+                        st.write(f"Indicator rule-based, estimare aproximativă: **{analysis['mastery']:.2f}**")
+                        st.write(f"Feedback: {analysis['learning_state']['state']}. {analysis['learning_state']['intervention']}")
+                        st.caption(f"Dată orientativă de revizuire: {analysis['review_date']} (nu este salvată și nu trimite mementouri).")
+                        if analysis["neural"]:
+                            st.caption(f"Predicție neurală experimentală: {analysis['neural']['predicted_state']}")
+                        if analysis["neural_error"]:
+                            st.warning(analysis["neural_error"])
+
+                recommendation = st.session_state.tutor_recommendation
+                if st.session_state.current_exercise_completed:
+                    if recommendation and recommendation["index"] in automatically_gradable_data.index:
+                        next_row = data.loc[recommendation["index"]]
+                        st.subheader("Următorul exercițiu sugerat")
+                        st.write(f"Țintă orientativă: {recommendation['target']} · domeniu: {next_row['Domeniu']}")
+                        st.write(next_row["Problema"])
+                        if st.button("Continuă cu exercițiul următor ➜", key=f"tutor_continue_{run_id}"):
+                            st.session_state.selected_exercise_idx = recommendation["index"]
+                            st.session_state.tutor_selection_generation += 1
+                            reset_exercise_state()
+                            st.rerun()
+                    else:
+                        st.info("Nu a rămas un alt exercițiu eligibil în acest domeniu.")
 
 with tabs[2]:
     st.header("Progresul meu")
