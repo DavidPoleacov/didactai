@@ -106,4 +106,4 @@ Training utilities are explicit development operations and can overwrite process
 - **David Poleacov — backend**
 - **Beatrice Batrinu — frontend**
 
-AI-assisted maintenance is recorded as later repository history; it is not represented as an original competition feature.
+
