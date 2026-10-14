@@ -17,6 +17,8 @@ from src.pedagogical_engine import (
     diagnose_learning_state,
     evaluate_answer,
     generate_diagnostic_bank,
+    load_hint_display_corrections,
+    load_semantic_grading_exclusion_hashes,
     next_review_date,
     recommend_next_exercise,
     target_difficulty_from_mastery,
@@ -60,9 +62,12 @@ def display_answer_feedback(result: dict) -> None:
 try:
     structured_model, domain_model, raw_data, report = load_assets()
     data = load_practice_bank(raw_data, FLAGS_PATH)
+    load_hint_display_corrections()
+    semantic_grading_exclusion_hashes = load_semantic_grading_exclusion_hashes()
     missing_features = set(FEATURE_COLUMNS).difference(data.columns)
     if missing_features:
         raise ValueError(f"Exercise data is missing model features: {', '.join(sorted(missing_features))}")
+    automatically_gradable_data = automatically_gradable_bank(data)
 except Exception as exc:
     st.error(f"Nu s-au putut încărca resursele necesare: {exc}")
     st.info("Verifică fișierele de date, modelele salvate și data/processed/exercise_review_flags.csv.")
@@ -71,7 +76,6 @@ except Exception as exc:
 data = data.copy()
 for column in ("Dificultate", "Itemul", "Sursa_year"):
     data[column] = pd.to_numeric(data[column], errors="coerce")
-automatically_gradable_data = automatically_gradable_bank(data)
 
 try:
     from src import neural_student_state_model as neural_module
@@ -113,6 +117,7 @@ SESSION_DEFAULTS = {
     "diagnostic_started": False,
     "diagnostic_seed": 42,
     "diagnostic_results": None,
+    "diagnostic_results_snapshot": None,
     "diagnostic_generation": 0,
 }
 for state_key, default in SESSION_DEFAULTS.items():
@@ -245,8 +250,29 @@ def process_verified_tutor_answer(result: dict, current_row: pd.Series, exercise
     return True
 
 
-def render_preview(row: pd.Series, prefix: str) -> None:
+def clear_preview_prefix(prefix: str) -> None:
+    for suffix in (
+        "answer", "hint_count", "latest_hint", "feedback", "estimate", "next",
+        "hint_button", "evaluate",
+    ):
+        st.session_state.pop(f"{prefix}_{suffix}", None)
+
+
+def clear_preview_context(context: str) -> None:
+    active_key = f"{context}_preview_active_prefix"
+    active_prefix = st.session_state.pop(active_key, None)
+    if active_prefix:
+        clear_preview_prefix(active_prefix)
+
+
+def render_preview(row: pd.Series, prefix: str, context: str) -> None:
     """Show an isolated demonstration interaction; never write tracked Tutor state."""
+    active_key = f"{context}_preview_active_prefix"
+    previous_prefix = st.session_state.get(active_key)
+    if previous_prefix and previous_prefix != prefix:
+        clear_preview_prefix(previous_prefix)
+    st.session_state[active_key] = prefix
+
     exercise_idx = int(row.name)
     st.caption("Simulare: această previzualizare nu modifică progresul Tutorului.")
     hint_key = f"{prefix}_hint_count"
@@ -256,7 +282,7 @@ def render_preview(row: pd.Series, prefix: str) -> None:
         st.session_state[hint_key] += 1
         st.session_state[f"{prefix}_latest_hint"] = choose_hint(
             str(row["Problema"]), row.get("Pasii de rezolvare", ""), st.session_state.mastery,
-            st.session_state[hint_key],
+            st.session_state[hint_key], exercise_idx, str(row.get("problem_hash", "")),
         )
     shown_hint = st.session_state.get(f"{prefix}_latest_hint")
     if shown_hint:
@@ -337,13 +363,19 @@ with tabs[0]:
         st.write(home_row["Problema"])
         st.caption(f"{home_row['Domeniu']} · {home_row['Tema_norm']} · {home_row['Dificultate_group']}")
         if home_idx not in automatically_gradable_data.index:
-            st.warning(
-                "Acest exercițiu este disponibil pentru explorare, dar formatul cheii nu "
-                "permite verificarea automată. Nu se poate înregistra un progres automat."
-            )
+            if str(home_row.get("problem_hash", "")) in semantic_grading_exclusion_hashes:
+                st.warning(
+                    "Acest exercițiu cu răspuns deschis este disponibil pentru explorare și "
+                    "verificare manuală; răspunsurile numerice valide pot varia."
+                )
+            else:
+                st.warning(
+                    "Acest exercițiu este disponibil pentru explorare, dar formatul cheii nu "
+                    "permite verificarea automată. Nu se poate înregistra un progres automat."
+                )
         left, right = st.columns(2)
         with left:
-            render_preview(home_row, f"home_preview_{home_idx}")
+            render_preview(home_row, f"home_preview_{home_idx}", "home")
         with right:
             domain_prediction = predict_domain_from_text(domain_model, str(home_row["Problema"]))
             feature_row = data.loc[[home_idx], FEATURE_COLUMNS]
@@ -360,6 +392,8 @@ with tabs[0]:
             st.session_state.diagnostic_started = True
             st.session_state.diagnostic_seed = int(time.time()) % 100000
             st.session_state.diagnostic_results = None
+            st.session_state.diagnostic_results_snapshot = None
+            clear_preview_context("diagnostic")
             st.session_state.diagnostic_generation += 1
             st.rerun()
     else:
@@ -369,33 +403,42 @@ with tabs[0]:
             st.info("Nu există suficiente exerciții eligibile pentru diagnostic.")
         else:
             responses = []
+            submitted_answers = []
             for number, item in enumerate(quiz):
                 st.write(f"{number + 1}. {item['Problema']}")
                 answer = st.text_input(
                     f"Răspunsul {number + 1}",
                     key=f"diagnostic_answer_{generation}_{number}",
                 )
+                submitted_answers.append(answer)
                 if answer:
                     verdict = evaluate_answer(answer, item["Raspunsul"])
                     if answer_result_is_verified(verdict):
                         responses.append({
                             "problem": item["Problema"], "domain": item["Domeniu"],
-                            "correct": verdict["correct"],
+                            "correct": verdict["correct"], "verified": True,
+                            "status": verdict["status"],
                         })
                     elif verdict["status"] not in {"no_answer"}:
                         st.caption(f"Răspunsul {number + 1}: neverificat.")
+            submitted_snapshot = tuple(submitted_answers)
+            if (
+                st.session_state.diagnostic_results is not None
+                and st.session_state.diagnostic_results_snapshot != submitted_snapshot
+            ):
+                st.session_state.diagnostic_results = None
+                st.session_state.diagnostic_results_snapshot = None
+                clear_preview_context("diagnostic")
             if st.button("Finalizează diagnosticul", key="diagnostic_finish"):
-                if responses:
-                    st.session_state.diagnostic_results = assess_diagnostic_results(
-                        responses, automatically_gradable_data,
-                    )
-                    st.rerun()
-                else:
-                    st.warning("Nu există încă răspunsuri pe care verificatorul să le poată evalua.")
+                st.session_state.diagnostic_results = assess_diagnostic_results(responses, data)
+                st.session_state.diagnostic_results_snapshot = submitted_snapshot
+                st.rerun()
             if st.button("Generează un diagnostic nou", key="diagnostic_new"):
                 for number in range(len(quiz)):
                     st.session_state.pop(f"diagnostic_answer_{generation}_{number}", None)
                 st.session_state.diagnostic_results = None
+                st.session_state.diagnostic_results_snapshot = None
+                clear_preview_context("diagnostic")
                 st.session_state.diagnostic_generation += 1
                 st.session_state.diagnostic_seed += 1
                 st.rerun()
@@ -409,7 +452,10 @@ with tabs[0]:
             else:
                 st.write(f"{domain}: {score['correct']}/{score['total']} corecte")
         weak_domains = profile["weak_domains"]
-        if weak_domains:
+        tested_answers = sum(score["total"] for score in profile["domain_scores"].values())
+        if tested_answers == 0:
+            st.info("Nu există răspunsuri verificate; toate domeniile disponibile rămân netestate.")
+        elif weak_domains:
             st.write("Domenii cu scor observat mai mic: " + ", ".join(weak_domains[:3]))
             recommended = recommend_next_exercise(
                 automatically_gradable_data, weak_domains[0], "2 - mediu", random_state=11,
@@ -420,6 +466,7 @@ with tabs[0]:
                 render_preview(
                     recommended.iloc[0],
                     f"diagnostic_preview_{generation}_{int(recommended.index[0])}",
+                    "diagnostic",
                 )
             else:
                 st.info("Nu există un exercițiu disponibil în acest domeniu.")
@@ -514,6 +561,7 @@ with tabs[1]:
                         st.session_state.tutor_latest_hint = choose_hint(
                             str(current["Problema"]), current.get("Pasii de rezolvare", ""),
                             st.session_state.mastery, st.session_state.current_exercise_hint_count,
+                            int(exercise_index), str(current.get("problem_hash", "")),
                         )
                         st.rerun()
                 if st.session_state.tutor_latest_hint:

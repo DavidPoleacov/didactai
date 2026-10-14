@@ -1,4 +1,6 @@
 import unittest
+import hashlib
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -9,9 +11,14 @@ from src.pedagogical_engine import (
     automatically_gradable_bank,
     choose_hint,
     evaluate_answer,
+    format_compatible_bank,
     generate_diagnostic_bank,
+    load_hint_display_corrections,
+    load_semantic_grading_exclusion_hashes,
     recommend_next_exercise,
+    split_solution_steps,
     tutor_answer_can_be_recorded,
+    validate_discriminant_display_correction,
 )
 
 
@@ -65,22 +72,125 @@ class AnswerRegressions(unittest.TestCase):
         self.assertIn("Nu există alți pași", choose_hint(problem, steps, 0.55, 8)["hint"])
         self.assertIn("Nu există alți pași", choose_hint(problem, "", 0.55, 2)["hint"])
 
+    def test_reviewed_discriminant_overlay_is_hash_checked_and_arithmetic_validated(self):
+        root = Path(__file__).resolve().parents[1]
+        source = pd.read_csv(
+            root / "data/processed/exercises_augmented.csv",
+            dtype=str,
+            keep_default_na=False,
+        )
+        content = load_practice_bank(
+            source, root / "data/processed/exercise_review_flags.csv",
+        )
+        automatically_gradable = automatically_gradable_bank(content)
+        corrections = load_hint_display_corrections()
+
+        self.assertEqual(len(corrections), 60)
+        self.assertEqual(sum(int(index) in automatically_gradable.index for index in corrections), 57)
+        suspicious_indices = {
+            int(index)
+            for index, row in source.iterrows()
+            if re.search(r"(?:Δ|delta)[^;]*?-\s*\d+\s*(?:²|\^2)", row["Pasii de rezolvare"], re.I)
+            and index in content.index
+        }
+        self.assertEqual(suspicious_indices, {int(index) for index in corrections})
+        for stable_index, correction in corrections.items():
+            row = source.loc[int(stable_index)]
+            steps = split_solution_steps(row["Pasii de rezolvare"])
+            step_index = int(correction["step_number"]) - 1
+            source_step = steps[step_index]
+            self.assertEqual(row["problem_hash"], correction["problem_hash"], stable_index)
+            self.assertEqual(source_step, correction["original_step"], stable_index)
+            self.assertEqual(
+                hashlib.sha256(source_step.encode("utf-8")).hexdigest(),
+                correction["source_step_sha256"],
+                stable_index,
+            )
+            self.assertTrue(
+                validate_discriminant_display_correction(
+                    row["Problema"], correction["original_step"], correction["corrected_step"],
+                ),
+                stable_index,
+            )
+            shown = choose_hint(
+                row["Problema"], row["Pasii de rezolvare"], 0.55, 2,
+                int(stable_index), row["problem_hash"],
+            )
+            self.assertIn(correction["corrected_step"], shown["hint"], stable_index)
+            self.assertNotIn(correction["original_step"], shown["hint"], stable_index)
+
+    def test_changed_problem_or_source_step_withholds_reviewed_hint(self):
+        root = Path(__file__).resolve().parents[1]
+        source = pd.read_csv(
+            root / "data/processed/exercises_augmented.csv",
+            dtype=str,
+            keep_default_na=False,
+        )
+        row = source.loc[337]
+        changed_steps = row["Pasii de rezolvare"].replace("-4²", "-5²", 1)
+        for problem_hash, solution in (
+            (row["problem_hash"], changed_steps),
+            ("different-problem-hash", row["Pasii de rezolvare"]),
+        ):
+            with self.subTest(problem_hash=problem_hash):
+                result = choose_hint(
+                    row["Problema"], solution, 0.55, 2, 337, problem_hash,
+                )
+                self.assertEqual(result["hint_type"], "review_required")
+                self.assertIn("retras temporar", result["hint"])
+                self.assertNotIn("-4²", result["hint"])
+
+    def test_first_hint_remains_scaffold_for_corrected_quadratic(self):
+        root = Path(__file__).resolve().parents[1]
+        source = pd.read_csv(
+            root / "data/processed/exercises_augmented.csv",
+            dtype=str,
+            keep_default_na=False,
+        )
+        row = source.loc[337]
+        first = choose_hint(
+            row["Problema"], row["Pasii de rezolvare"], 0.55, 1, 337, row["problem_hash"],
+        )
+        self.assertEqual(first["shown_solution_steps"], 0)
+        self.assertNotIn("1; x₂ = 3", first["hint"])
+        self.assertNotIn("Δ =", first["hint"])
+
 
 class DiagnosticAndRecommendationRegressions(unittest.TestCase):
     def test_weakest_domain_first_and_untested_domains_are_explicit(self):
         data = pd.DataFrame({
-            "Domeniu": ["A", "B", "C"], "Tema_norm": ["a", "b", "c"],
-            "Raspunsul": ["1", "2", "3"],
-            "Dificultate": [1, 1, 1], "problem_words": [3, 3, 3],
+            "Domeniu": ["A", "B", "C", "Manual"],
+            "Tema_norm": ["a", "b", "c", "manual"],
+            "Raspunsul": ["1", "2", "3", "12 furlongs"],
+            "Dificultate": [1, 1, 1, 1], "problem_words": [3, 3, 3, 3],
         })
         profile = assess_diagnostic_results([
             {"domain": "A", "correct": True}, {"domain": "A", "correct": False},
             {"domain": "B", "correct": False}, {"domain": "B", "correct": False},
+            {"domain": "Manual", "correct": False, "verified": False, "status": "incorrect"},
         ], data)
         self.assertEqual(profile["weak_domains"][:2], ["B", "A"])
-        self.assertEqual(profile["domain_scores"]["C"]["status"], "untested")
-        self.assertIsNone(profile["domain_scores"]["C"]["accuracy"])
+        self.assertEqual(profile["domain_scores"]["Manual"]["status"], "untested")
+        self.assertIsNone(profile["domain_scores"]["Manual"]["accuracy"])
         self.assertEqual(profile["domain_scores"]["B"]["priority"], 1.0)
+        empty = assess_diagnostic_results([], data)
+        self.assertEqual(set(empty["domain_scores"]), {"A", "B", "C", "Manual"})
+        self.assertTrue(all(score["status"] == "untested" for score in empty["domain_scores"].values()))
+        self.assertEqual(empty["weak_domains"], [])
+
+    def test_explicit_unverified_status_never_counts_but_legacy_prevalidated_does(self):
+        data = pd.DataFrame({
+            "Domeniu": ["A", "B"], "Raspunsul": ["1", "2"],
+            "Tema_norm": ["a", "b"], "Dificultate": [1, 1], "problem_words": [2, 2],
+        })
+        profile = assess_diagnostic_results([
+            {"domain": "A", "correct": False, "verified": False},
+            {"domain": "A", "correct": False, "status": "needs_review"},
+            {"domain": "A", "correct": False, "status": "unverified"},
+            {"domain": "B", "correct": False},
+        ], data)
+        self.assertEqual(profile["domain_scores"]["A"]["status"], "untested")
+        self.assertEqual(profile["domain_scores"]["B"]["total"], 1)
 
     def test_diagnostic_round_robin_coverage_empty_and_deterministic(self):
         rows = []
@@ -144,11 +254,37 @@ class DiagnosticAndRecommendationRegressions(unittest.TestCase):
         automatic = automatically_gradable_bank(content)
         browsing_only = content.loc[~content.index.isin(automatic.index)]
 
-        self.assertEqual((len(source), len(content), len(automatic), len(browsing_only)), (1344, 1285, 1270, 15))
-        self.assertIn(460, automatic.index)
-        self.assertTrue(
-            all(evaluate_answer(answer, answer)["status"] != "correct" for answer in browsing_only["Raspunsul"])
+        compatible = format_compatible_bank(content)
+        semantic_manual = compatible.loc[compatible.index.difference(automatic.index)]
+        format_manual = content.loc[~content.index.isin(compatible.index)]
+        self.assertEqual(
+            (len(source), len(content), len(compatible), len(format_manual), len(automatic), len(browsing_only)),
+            (1344, 1285, 1270, 15, 1269, 16),
         )
+        self.assertIn(460, automatic.index)
+        self.assertEqual(semantic_manual.index.tolist(), [37])
+        self.assertIn(
+            "fie functia f:r -> r, f(x) = x^2 - 4x + ?. scrieti in caseta un numar real, "
+            "astfel incat parabola sa intersecteze axa ox in doua puncte.",
+            load_semantic_grading_exclusion_hashes(),
+        )
+        self.assertTrue(all(
+            evaluate_answer(answer, answer)["status"] == "correct"
+            for answer in semantic_manual["Raspunsul"]
+        ))
+        self.assertTrue(
+            all(evaluate_answer(answer, answer)["status"] != "correct" for answer in format_manual["Raspunsul"])
+        )
+        diagnostic = generate_diagnostic_bank(automatic, 100)
+        self.assertNotIn(
+            source.loc[37, "Problema"],
+            {item["Problema"] for item in diagnostic},
+        )
+        recommendation = recommend_next_exercise(
+            content, str(source.loc[37, "Domeniu"]),
+            str(source.loc[37, "Dificultate_group"]),
+        )
+        self.assertNotIn(37, recommendation.index)
 
     def test_recommendation_excludes_flagged_hashes(self):
         root = Path(__file__).resolve().parents[1]

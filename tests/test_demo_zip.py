@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -118,6 +119,105 @@ class DemoZipTests(unittest.TestCase):
         packaged, _ = self._build_and_check()
 
         self.assertEqual(packaged, {"app.py"})
+
+    def test_nested_secrets_environments_symlinks_and_archives_are_excluded(self):
+        (self.root / "app.py").write_text("application\n", encoding="utf-8")
+        (self.root / "src").mkdir()
+        (self.root / "src/required.py").write_text("required module\n", encoding="utf-8")
+        (self.root / "data").mkdir()
+        (self.root / "data/required.csv").write_text("required data\n", encoding="utf-8")
+        (self.root / "models").mkdir()
+        (self.root / "models/required.joblib").write_text("required model\n", encoding="utf-8")
+        (self.root / "config").mkdir()
+        (self.root / "config/.env").write_text("SYNTHETIC_ROOT_SECRET\n", encoding="utf-8")
+        (self.root / "config/.env.production").write_text("SYNTHETIC_LIVE_ENV\n", encoding="utf-8")
+        (self.root / "config/secrets.toml").write_text("SYNTHETIC_NESTED_SECRET\n", encoding="utf-8")
+        (self.root / "config/id_rsa").write_text("SYNTHETIC_PRIVATE_KEY\n", encoding="utf-8")
+        (self.root / "config/server_privatekey.p8").write_text("SYNTHETIC_PKCS8_KEY\n", encoding="utf-8")
+        (self.root / "config/example.secret").write_text("SYNTHETIC_SECRET_SUFFIX\n", encoding="utf-8")
+        (self.root / ".env.example").write_text("EXAMPLE_VALUE=allowed\n", encoding="utf-8")
+        (self.root / "config/secrets.toml.example").write_text("placeholder=true\n", encoding="utf-8")
+
+        for environment in (".venv-audit", "custom-python-env"):
+            directory = self.root / environment
+            directory.mkdir()
+            (directory / "pyvenv.cfg").write_text("home = /synthetic\n", encoding="utf-8")
+            (directory / "environment_payload.py").write_text("SYNTHETIC_ENV_PAYLOAD\n", encoding="utf-8")
+        (self.root / "tools/__pycache__").mkdir(parents=True)
+        (self.root / "tools/__pycache__/cached.pyc").write_bytes(b"SYNTHETIC_CACHE")
+        (self.root / "generated.zip").write_bytes(b"SYNTHETIC_ARCHIVE")
+        (self.root / "package.whl").write_bytes(b"SYNTHETIC_WHEEL")
+        (self.root / "package.tar.gz").write_bytes(b"SYNTHETIC_TAR")
+
+        internal_target = self.root / "data/internal-target.txt"
+        internal_target.write_text("INTERNAL_TARGET_CONTENT\n", encoding="utf-8")
+        internal_link = self.root / "data/internal-alias.txt"
+        internal_link.symlink_to(internal_target)
+        with tempfile.TemporaryDirectory() as outside_directory:
+            outside_target = Path(outside_directory) / "outside.txt"
+            outside_target.write_text("SYNTHETIC_OUTSIDE_SYMLINK_TARGET\n", encoding="utf-8")
+            external_link = self.root / "data/outside-alias.txt"
+            external_link.symlink_to(outside_target)
+            outside_directory_link = self.root / "linked-directory"
+            outside_directory_link.symlink_to(outside_directory, target_is_directory=True)
+
+            original_read_bytes = Path.read_bytes
+            opened_paths = []
+
+            def tracked_read_bytes(path):
+                opened_paths.append(path)
+                return original_read_bytes(path)
+
+            with patch.object(Path, "read_bytes", tracked_read_bytes):
+                packaged, _ = self._build_and_check()
+
+            self.assertNotIn(internal_link, opened_paths)
+            self.assertNotIn(external_link, opened_paths)
+            self.assertNotIn(outside_target, opened_paths)
+            self.assertNotIn(outside_directory_link / "outside.txt", packaged)
+            self.assertNotIn("data/internal-alias.txt", packaged)
+            self.assertNotIn("data/outside-alias.txt", packaged)
+
+        required = {
+            "app.py", "src/required.py", "data/required.csv", "models/required.joblib",
+            ".env.example", "config/secrets.toml.example", "data/internal-target.txt",
+        }
+        self.assertTrue(required.issubset(packaged))
+        with ZipFile(build_demo_zip.OUTPUT) as archive:
+            payload = b"\n".join(
+                archive.read(name)
+                for name in archive.namelist()
+                if name.endswith("MANIFEST.sha256") or name != f"{build_demo_zip.ARCHIVE_ROOT}/MANIFEST.sha256"
+            )
+        for marker in (
+            b"SYNTHETIC_ROOT_SECRET", b"SYNTHETIC_LIVE_ENV", b"SYNTHETIC_NESTED_SECRET",
+            b"SYNTHETIC_PRIVATE_KEY", b"SYNTHETIC_SECRET_SUFFIX", b"SYNTHETIC_ENV_PAYLOAD",
+            b"SYNTHETIC_PKCS8_KEY",
+            b"SYNTHETIC_CACHE", b"SYNTHETIC_ARCHIVE", b"SYNTHETIC_WHEEL",
+            b"SYNTHETIC_TAR", b"SYNTHETIC_OUTSIDE_SYMLINK_TARGET",
+        ):
+            self.assertNotIn(marker, payload)
+
+    def test_docker_context_ignores_runtime_secrets_but_keeps_application_paths(self):
+        repository = Path(__file__).resolve().parents[1]
+        ignore_rules = (repository / ".dockerignore").read_text(encoding="utf-8")
+        dockerfile = (repository / "Dockerfile").read_text(encoding="utf-8")
+        launcher = (repository / "run_docker.sh").read_text(encoding="utf-8")
+
+        for rule in (
+            "**/.env", "**/.env.*", "**/secrets.toml", "**/id_rsa", "**/*.pem",
+            "**/*.key", "**/*.secret", "**/*.zip", "**/__pycache__/",
+            "**/.venv-*", "**/pyvenv.cfg",
+        ):
+            self.assertIn(rule, ignore_rules)
+        for instruction in (
+            "COPY app.py ./", "COPY src/ ./src/", "COPY data/ ./data/",
+            "COPY models/ ./models/", "COPY .streamlit/ ./.streamlit/",
+        ):
+            self.assertIn(instruction, dockerfile)
+        self.assertNotIn("COPY . /app", dockerfile)
+        self.assertIn("docker run --rm -p 8501:8501", launcher)
+        self.assertNotIn('-v "$(pwd)"', launcher)
 
 
 if __name__ == "__main__":

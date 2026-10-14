@@ -21,8 +21,12 @@ COPY requirements.txt requirements-light.txt ./
 RUN pip install --upgrade pip setuptools wheel \
     && pip install --no-cache-dir -r requirements.txt
 
-# Copy the app
-COPY . /app
+COPY app.py ./
+COPY src/ ./src/
+COPY data/ ./data/
+COPY models/ ./models/
+COPY assets/ ./assets/
+COPY .streamlit/ ./.streamlit/
 
 EXPOSE 8501
 

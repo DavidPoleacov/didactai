@@ -1,4 +1,5 @@
 import copy
+import re
 import unittest
 from pathlib import Path
 
@@ -142,6 +143,7 @@ class TutorNavigationTests(unittest.TestCase):
         self.assertIsNotNone(recommendation)
         next_index = recommendation["index"]
         self.assertNotEqual(next_index, index)
+        self.assertNotEqual(next_index, 37)
         practice = load_practice_bank(
             pd.read_csv(ROOT / "data/processed/exercises_augmented.csv"),
             ROOT / "data/processed/exercise_review_flags.csv",
@@ -293,6 +295,128 @@ class TutorNavigationTests(unittest.TestCase):
         )
         self.assertTrue(profile["weak_domains"])
         self.assertGreater(len(profile["domain_scores"]), 0)
+
+    def test_diagnostic_profile_is_invalidated_when_answer_changes_before_refinalizing(self):
+        app = AppTest.from_file(str(APP_PATH), default_timeout=120).run()
+        app.button(key="diagnostic_start").click().run()
+        app.session_state["diagnostic_seed"] = 1
+        app.run()
+        generation = app.session_state["diagnostic_generation"]
+        seed = app.session_state["diagnostic_seed"]
+        practice = load_practice_bank(
+            pd.read_csv(ROOT / "data/processed/exercises_augmented.csv"),
+            ROOT / "data/processed/exercise_review_flags.csv",
+        )
+        quiz = generate_diagnostic_bank(automatically_gradable_bank(practice), 5, seed)
+        self.assertTrue(quiz)
+
+        wrong_submission = None
+        for number, item in enumerate(quiz):
+            expected = str(item["Raspunsul"]).strip()
+            match = re.fullmatch(
+                r"(?P<label>[a-z][a-z0-9_]*=)?[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+|"
+                r"\d+/\d+)(?P<unit>\s+.*)?",
+                expected,
+                re.IGNORECASE,
+            )
+            if match is None:
+                continue
+            prefix = match.group("label") or ""
+            suffix = match.group("unit") or ""
+            for candidate_value in ("987654321", "-987654321", "314159265"):
+                candidate = f"{prefix}{candidate_value}{suffix}"
+                if evaluate_answer(candidate, expected)["status"] == "incorrect":
+                    wrong_submission = number, candidate
+                    break
+            if wrong_submission is not None:
+                break
+        self.assertIsNotNone(wrong_submission, "Diagnostic quiz must contain a verifiable scalar key.")
+        response_number, wrong_answer = wrong_submission
+        answer_key = f"diagnostic_answer_{generation}_{response_number}"
+        app.text_input(key=answer_key).set_value(wrong_answer)
+        app.button(key="diagnostic_finish").click().run()
+        previous_profile = copy.deepcopy(app.session_state["diagnostic_results"])
+        quiz_item = quiz[response_number]
+        self.assertEqual(previous_profile["domain_scores"][quiz_item["Domeniu"]]["total"], 1)
+        self.assertTrue(previous_profile["weak_domains"])
+        self.assertEqual(
+            app.session_state["diagnostic_results_snapshot"][response_number],
+            wrong_answer,
+        )
+
+        app.text_input(key=answer_key).set_value("12 or 99").run()
+        self.assertIsNone(app.session_state["diagnostic_results"])
+        self.assertIsNone(app.session_state["diagnostic_results_snapshot"])
+        self.assertFalse(any(
+            "Exercițiu sugerat pentru explorare" in str(item.value) for item in app.markdown
+        ))
+
+        app.button(key="diagnostic_finish").click().run()
+        current_profile = app.session_state["diagnostic_results"]
+        self.assertFalse(current_profile["weak_domains"])
+        self.assertTrue(all(
+            score["status"] == "untested" and score["total"] == 0
+            for score in current_profile["domain_scores"].values()
+        ))
+        self.assertTrue(any(
+            "toate domeniile disponibile rămân netestate" in item.value for item in app.info
+        ))
+        self.assertFalse(any(
+            "Exercițiu sugerat pentru explorare" in str(item.value) for item in app.markdown
+        ))
+
+    def test_home_preview_verified_result_is_cleared_after_leave_and_return(self):
+        app = AppTest.from_file(str(APP_PATH), default_timeout=120).run()
+        prefix = "home_preview_460"
+        app.text_input(key=f"{prefix}_answer").set_value("12")
+        app.button(key=f"{prefix}_evaluate").click().run()
+        self.assertEqual(app.session_state[f"{prefix}_feedback"]["status"], "correct")
+        self.assertIsNotNone(app.session_state[f"{prefix}_estimate"])
+        self.assertIsNotNone(app.session_state[f"{prefix}_next"])
+
+        app.selectbox(key="home_exercise_Toate_Toate").set_value(461).run()
+        self.assertNotIn(f"{prefix}_answer", app.session_state)
+        self.assertNotIn(f"{prefix}_feedback", app.session_state)
+        self.assertNotIn(f"{prefix}_estimate", app.session_state)
+        self.assertNotIn(f"{prefix}_next", app.session_state)
+
+        app.selectbox(key="home_exercise_Toate_Toate").set_value(460).run()
+        self.assertEqual(app.text_input(key=f"{prefix}_answer").value, "")
+        self.assertNotIn(f"{prefix}_feedback", app.session_state)
+        self.assertNotIn(f"{prefix}_estimate", app.session_state)
+        self.assertNotIn(f"{prefix}_next", app.session_state)
+
+    def test_home_and_diagnostic_preview_contexts_keep_independent_hint_state(self):
+        app = AppTest.from_file(str(APP_PATH), default_timeout=120).run()
+        home_prefix = "home_preview_460"
+        app.button(key=f"{home_prefix}_hint_button").click().run()
+        home_hint = copy.deepcopy(app.session_state[f"{home_prefix}_latest_hint"])
+
+        practice = load_practice_bank(
+            pd.read_csv(ROOT / "data/processed/exercises_augmented.csv"),
+            ROOT / "data/processed/exercise_review_flags.csv",
+        )
+        eligible = automatically_gradable_bank(practice)
+        weak_domain = "Funcții"
+        profile = assess_diagnostic_results(
+            [{"domain": weak_domain, "correct": False}], practice,
+        )
+        recommended = recommend_next_exercise(
+            eligible, weak_domain, "2 - mediu", random_state=11,
+        )
+        self.assertFalse(recommended.empty)
+        generation = 7
+        app.session_state["diagnostic_started"] = True
+        app.session_state["diagnostic_generation"] = generation
+        app.session_state["diagnostic_results"] = profile
+        app.session_state["diagnostic_results_snapshot"] = ("", "", "", "", "")
+        app.run()
+        diagnostic_prefix = f"diagnostic_preview_{generation}_{int(recommended.index[0])}"
+        self.assertEqual(app.session_state[f"{home_prefix}_latest_hint"], home_hint)
+
+        app.button(key=f"{diagnostic_prefix}_hint_button").click().run()
+        self.assertEqual(app.session_state[f"{home_prefix}_latest_hint"], home_hint)
+        self.assertEqual(app.session_state[f"{diagnostic_prefix}_hint_count"], 1)
 
 
 if __name__ == "__main__":

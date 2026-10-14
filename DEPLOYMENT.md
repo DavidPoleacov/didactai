@@ -6,6 +6,7 @@ Use Python 3.12 and the declared lightweight dependencies:
 
 ```bash
 python3.12 -m venv .venv-demo
+.venv-demo/bin/python -m pip install --upgrade pip
 .venv-demo/bin/python -m pip install -r requirements-light.txt
 .venv-demo/bin/python -m unittest discover -s tests -v
 .venv-demo/bin/python diagnose.py
@@ -16,6 +17,7 @@ On Windows, use the venv interpreter directly to avoid PowerShell activation-pol
 
 ```powershell
 py -3.12 -m venv .venv-demo
+.\.venv-demo\Scripts\python.exe -m pip install --upgrade pip
 .\.venv-demo\Scripts\python.exe -m pip install -r requirements-light.txt
 .\.venv-demo\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv-demo\Scripts\python.exe diagnose.py
@@ -23,6 +25,7 @@ py -3.12 -m venv .venv-demo
 ```
 
 The local Streamlit URL is normally `http://localhost:8501`. TensorFlow is not required.
+Follow [pip's official upgrade guidance](https://pip.pypa.io/en/stable/installation/) when managing the installer.
 
 ## Streamlit Community Cloud
 
@@ -32,7 +35,7 @@ The optional TensorFlow path is a separate local development installation via `r
 
 ## Docker
 
-`Dockerfile` installs the default lightweight `requirements.txt`. `./run_docker.sh` builds and starts the local container. No deployment is performed by this repository's checks.
+`Dockerfile` installs the default lightweight `requirements.txt` in Python 3.12 without TensorFlow. From the repository root, run `bash run_docker.sh`; ZIP extraction does not preserve a reliable executable bit for the launcher. No deployment is performed by dependency-stage checks.
 
 ## Explicit model development
 

@@ -6,9 +6,12 @@ tutor remains safe, explainable, and not a black-box answer machine.
 """
 from __future__ import annotations
 
+import csv
+import hashlib
 import re
 import unicodedata
 from datetime import date, timedelta
+from functools import lru_cache
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
@@ -226,6 +229,16 @@ def evaluate_answer(student_answer: str, expected_answer: str) -> Dict:
 
 
 def automatically_gradable_bank(data: pd.DataFrame) -> pd.DataFrame:
+    """Keep format-compatible rows except separately reviewed semantic exclusions."""
+    compatible = format_compatible_bank(data)
+    if "problem_hash" not in compatible.columns:
+        return compatible
+    excluded_hashes = load_semantic_grading_exclusion_hashes()
+    hashes = compatible["problem_hash"].fillna("").astype(str).str.strip()
+    return compatible.loc[~hashes.isin(excluded_hashes)].copy()
+
+
+def format_compatible_bank(data: pd.DataFrame) -> pd.DataFrame:
     """Keep rows whose stored key the conservative checker can verify against itself."""
     if "Raspunsul" not in data.columns:
         return data.iloc[0:0].copy()
@@ -245,8 +258,212 @@ def split_solution_steps(solution: str) -> List[str]:
     return steps if steps else [text[:240]]
 
 
-def choose_hint(problem: str, solution_steps: str, mastery: float, hints_used: int) -> Dict:
+HINT_DISPLAY_CORRECTIONS_PATH = (
+    Path(__file__).resolve().parents[1] / "data" / "processed" / "hint_display_corrections.csv"
+)
+SEMANTIC_GRADING_EXCLUSIONS_PATH = (
+    Path(__file__).resolve().parents[1] / "data" / "processed" / "semantic_grading_exclusions.csv"
+)
+HINT_REVIEW_MESSAGE = "Indiciul salvat este retras temporar pentru verificare editorială."
+_SUSPICIOUS_NEGATIVE_SQUARE = re.compile(
+    r"(?:Δ|delta)[^;]*?-\s*\d+\s*(?:²|\^2)", re.IGNORECASE
+)
+_QUADRATIC_COEFFICIENTS = re.compile(
+    r"(?<![\w])(?P<a>[+-]?\s*(?:\d+\s*)?)x(?:²|\^2)"
+    r"\s*(?P<b>[+-]\s*(?:\d+\s*)?)x(?:\s*(?P<c>[+-]\s*\d+))?",
+    re.IGNORECASE,
+)
+_SOURCE_DISCRIMINANT = re.compile(
+    r"^\s*Δ\s*=\s*(?:b²\s*-\s*4ac\s*=\s*)?"
+    r"(?P<b>-?\d+)\s*(?:²|\^2)\s*-\s*4[·*](?P<a>[+-]?\d+)[·*](?P<c>[+-]?\d+)"
+    r"(?P<tail>.*)$",
+    re.IGNORECASE,
+)
+_CORRECTED_DISCRIMINANT = re.compile(
+    r"^\s*Δ\s*=\s*(?:b²\s*-\s*4ac\s*=\s*)?"
+    r"\((?P<b>[+-]\d+)\)\s*(?:²|\^2)\s*-\s*4[·*](?P<a>[+-]?\d+)[·*](?P<c>[+-]?\d+)"
+    r"(?P<tail>.*)$",
+    re.IGNORECASE,
+)
+_FINAL_INTEGER = re.compile(r"=\s*(-?\d+)\s*$")
+
+
+@lru_cache(maxsize=1)
+def load_hint_display_corrections() -> Dict[str, Dict[str, str]]:
+    """Load the reviewed, source-hash-validated hint display overlay."""
+    required = {
+        "stable_index", "problem_hash", "step_number", "original_step", "corrected_step",
+        "rationale", "source_step_sha256",
+    }
+    try:
+        with HINT_DISPLAY_CORRECTIONS_PATH.open(encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            missing = required.difference(reader.fieldnames or ())
+            if missing:
+                raise ValueError(f"Hint correction overlay is missing columns: {', '.join(sorted(missing))}")
+            records = {}
+            for row in reader:
+                stable_index = row["stable_index"].strip()
+                if not stable_index.isdecimal() or stable_index in records:
+                    raise ValueError(f"Invalid or duplicate hint correction index: {stable_index!r}")
+                if not all(row[column].strip() for column in required - {"corrected_step"}):
+                    raise ValueError(f"Incomplete hint correction metadata at index {stable_index}.")
+                if not row["corrected_step"].strip():
+                    raise ValueError(f"Missing corrected hint step at index {stable_index}.")
+                if not row["step_number"].isdecimal() or int(row["step_number"]) < 1:
+                    raise ValueError(f"Invalid source step number at stable index {stable_index}.")
+                if not re.fullmatch(r"[0-9a-f]{64}", row["source_step_sha256"]):
+                    raise ValueError(f"Invalid source-step SHA-256 at stable index {stable_index}.")
+                records[stable_index] = row
+    except OSError as exc:
+        raise ValueError(f"Unable to load reviewed hint corrections: {exc}") from exc
+    return records
+
+
+@lru_cache(maxsize=1)
+def load_semantic_grading_exclusion_hashes() -> frozenset[str]:
+    """Load separate, reviewed answer-semantics exclusions by stable problem hash."""
+    required = {"stable_index", "problem_hash", "reason"}
+    try:
+        with SEMANTIC_GRADING_EXCLUSIONS_PATH.open(encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            missing = required.difference(reader.fieldnames or ())
+            if missing:
+                raise ValueError(
+                    f"Semantic grading exclusions are missing columns: {', '.join(sorted(missing))}"
+                )
+            records = list(reader)
+    except OSError as exc:
+        raise ValueError(f"Unable to load semantic grading exclusions: {exc}") from exc
+    hashes = set()
+    for row in records:
+        stable_index = row["stable_index"].strip()
+        problem_hash = row["problem_hash"].strip()
+        if not stable_index.isdecimal() or not problem_hash or not row["reason"].strip():
+            raise ValueError(f"Incomplete semantic grading exclusion at index {stable_index!r}.")
+        if problem_hash in hashes:
+            raise ValueError(f"Duplicate semantic grading exclusion hash at index {stable_index}.")
+        hashes.add(problem_hash)
+    return frozenset(hashes)
+
+
+def _parse_coefficient(value: str | None, default: int) -> int:
+    if value is None:
+        return 0
+    cleaned = re.sub(r"\s+", "", value)
+    if cleaned in {"", "+"}:
+        return default
+    if cleaned == "-":
+        return -default
+    return int(cleaned)
+
+
+def _quadratic_coefficients(problem: str) -> tuple[int, int, int] | None:
+    match = _QUADRATIC_COEFFICIENTS.search(str(problem))
+    if not match:
+        return None
+    try:
+        coefficients = (
+            _parse_coefficient(match.group("a"), 1),
+            _parse_coefficient(match.group("b"), 1),
+            _parse_coefficient(match.group("c"), 1),
+        )
+    except ValueError:
+        return None
+    if any(abs(value) > 10_000 for value in coefficients):
+        return None
+    return coefficients
+
+
+def _reported_discriminant_value(tail: str) -> int | None:
+    match = _FINAL_INTEGER.search(tail)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def validate_discriminant_display_correction(
+    problem: str,
+    original_step: str,
+    corrected_step: str,
+) -> bool:
+    """Validate one signed-b substitution using bounded integer arithmetic only."""
+    coefficients = _quadratic_coefficients(problem)
+    source = _SOURCE_DISCRIMINANT.fullmatch(original_step)
+    corrected = _CORRECTED_DISCRIMINANT.fullmatch(corrected_step)
+    if coefficients is None or source is None or corrected is None:
+        return False
+    a, b, c = coefficients
+    try:
+        source_values = tuple(int(source.group(key)) for key in ("b", "a", "c"))
+        corrected_values = tuple(int(corrected.group(key)) for key in ("b", "a", "c"))
+    except ValueError:
+        return False
+    if source_values != corrected_values or source_values != (b, a, c) or b >= 0:
+        return False
+    discriminant = b * b - 4 * a * c
+    if abs(discriminant) > 1_000_000_000_000:
+        return False
+    return (
+        _reported_discriminant_value(source.group("tail")) == discriminant
+        and _reported_discriminant_value(corrected.group("tail")) == discriminant
+    )
+
+
+def _prepare_hint_steps(
+    problem: str,
+    solution_steps: str,
+    stable_index: int | None,
+    problem_hash: str | None,
+) -> tuple[List[str], set[int]]:
     steps = split_solution_steps(solution_steps)
+    corrections = load_hint_display_corrections()
+    record = corrections.get(str(stable_index)) if stable_index is not None else None
+    if record is None and stable_index is None and problem_hash:
+        record = next(
+            (entry for entry in corrections.values() if entry["problem_hash"] == str(problem_hash)),
+            None,
+        )
+
+    withheld: set[int] = set()
+    if record is not None:
+        step_index = int(record["step_number"]) - 1
+        if step_index < 0 or step_index >= len(steps):
+            withheld.add(step_index)
+        else:
+            source_step = steps[step_index]
+            source_hash = hashlib.sha256(source_step.encode("utf-8")).hexdigest()
+            source_matches = (
+                (stable_index is None or str(stable_index) == record["stable_index"])
+                and str(problem_hash or "") == record["problem_hash"]
+                and source_step == record["original_step"]
+                and source_hash == record["source_step_sha256"]
+            )
+            arithmetic_matches = validate_discriminant_display_correction(
+                problem, record["original_step"], record["corrected_step"],
+            )
+            if source_matches and arithmetic_matches:
+                steps[step_index] = record["corrected_step"]
+            else:
+                withheld.add(step_index)
+
+    suspicious = {
+        index for index, step in enumerate(steps) if _SUSPICIOUS_NEGATIVE_SQUARE.search(step)
+    }
+    for index in suspicious:
+        if not (record is not None and index == int(record["step_number"]) - 1 and index not in withheld):
+            withheld.add(index)
+    return steps, withheld
+
+
+def choose_hint(
+    problem: str,
+    solution_steps: str,
+    mastery: float,
+    hints_used: int,
+    stable_index: int | None = None,
+    problem_hash: str | None = None,
+) -> Dict:
     request_number = max(int(hints_used), 1)
     if request_number == 1:
         hint_type = "guided"
@@ -256,8 +473,15 @@ def choose_hint(problem: str, solution_steps: str, mastery: float, hints_used: i
             hint = "Notează datele cunoscute și ce trebuie aflat. Alege relația potrivită și fă primul pas fără să sari direct la rezultat."
         shown = 0
     else:
+        steps, withheld = _prepare_hint_steps(problem, solution_steps, stable_index, problem_hash)
         step_index = request_number - 2
-        if steps and step_index < len(steps):
+        if step_index in withheld:
+            return {
+                "hint_type": "review_required",
+                "hint": HINT_REVIEW_MESSAGE,
+                "shown_solution_steps": min(step_index, len(steps)),
+            }
+        if steps and 0 <= step_index < len(steps):
             is_final = step_index == len(steps) - 1
             hint_type = "soluție completă" if is_final else "pas ghidat"
             prefix = "Ultimul pas al soluției:" if is_final else f"Pasul {step_index + 1}:"
@@ -360,19 +584,34 @@ def generate_diagnostic_bank(data: pd.DataFrame, n_questions: int = 5, random_st
 
 
 def assess_diagnostic_results(responses: List[Dict], data: pd.DataFrame) -> Dict:
-    """Estimate weak domains from a short diagnostic quiz."""
-    if not responses:
-        return {"weak_domains": [], "domain_scores": {}, "recommended_themes": []}
+    """Score only verified evidence while reporting every content-eligible domain.
 
+    Legacy prevalidated items containing a boolean ``correct`` and a domain are
+    accepted when both ``verified`` and ``status`` are absent. Explicit
+    verification/status fields must indicate a definite correct or incorrect
+    answer.
+    """
     eligible_data = automatically_gradable_bank(data)
     scores = {}
-    if "Domeniu" in eligible_data:
-        for domain in sorted(eligible_data["Domeniu"].dropna().unique().tolist()):
+    if "Domeniu" in data:
+        for domain in sorted(data["Domeniu"].dropna().unique().tolist()):
             scores[domain] = {"correct": 0, "total": 0}
 
     for item in responses:
+        verified = item.get("verified")
+        status = item.get("status")
+        if "verified" in item and verified is not True:
+            continue
+        if status is not None and status not in {"correct", "incorrect"}:
+            continue
+        if "verified" not in item and status is None:
+            # Legacy prevalidated responses require an explicit boolean verdict.
+            pass
+        correct_value = item.get("correct")
+        if not isinstance(correct_value, (bool, np.bool_)):
+            continue
         domain = item.get("domain") or item.get("Domeniu") or "Alt"
-        correct = bool(item.get("correct", False))
+        correct = bool(correct_value)
         scores.setdefault(domain, {"correct": 0, "total": 0})
         scores[domain]["correct"] += int(correct)
         scores[domain]["total"] += 1

@@ -111,6 +111,28 @@ class EmptyTutorBankAppTests(unittest.TestCase):
         ))
         self._assert_progress_history_retained(app)
 
+    def test_zero_answer_diagnostic_renders_content_domain_as_untested(self):
+        supported = self._template_row(460, "supported-hash", "12", "Supported")
+        browsing_only = self._template_row(1344, "manual-domain-hash", "12 furlongs", "Manual only")
+        bank = self._practice_fixture(pd.concat([supported, browsing_only]))
+        app = self._app_with_bank(bank)
+
+        app.button(key="diagnostic_start").click().run()
+        app.button(key="diagnostic_finish").click().run()
+
+        profile = app.session_state["diagnostic_results"]
+        self.assertEqual(set(profile["domain_scores"]), {"Supported", "Manual only"})
+        self.assertTrue(all(
+            score["status"] == "untested" and score["total"] == 0
+            for score in profile["domain_scores"].values()
+        ))
+        self.assertTrue(any(
+            "toate domeniile disponibile rămân netestate" in item.value for item in app.info
+        ))
+        self.assertTrue(any(
+            "Manual only: netestat" in str(item.value) for item in app.markdown
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

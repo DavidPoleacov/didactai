@@ -13,7 +13,7 @@ The saved report is `models/evaluation_report.json`. Both classifiers were train
 
 The structured model is a preprocessing pipeline with median imputation/scaling, categorical imputation/one-hot encoding, and a `RandomForestClassifier`. Inputs include `Itemul`, `Sursa_year`, problem/solution/answer lengths, digit and symbol counts, indicators for mathematical constructs, and categorical `Tema_norm`, `Domeniu`, and `Sursa_type`. The known topic/domain and source metadata are part of the features; this is not a text-only difficulty model.
 
-The domain model combines word/character TF-IDF with `ComplementNB`. It predicts a bank domain; it does not generate an explanation or rank recommendations.
+The saved domain model uses a word-level `TfidfVectorizer` with `analyzer="word"` and `ngram_range=(1, 2)`, followed by `ComplementNB`. It uses word unigrams and bigrams (not character TF-IDF). It predicts a bank domain; it does not generate an explanation or rank recommendations.
 
 Reproduce the saved holdout predictions without fitting a model:
 
