@@ -105,4 +105,4 @@ Imaginea lightweight folosește Python 3.12 fără TensorFlow. Din rădăcina re
 - **David Poleacov — backend**
 - **Beatrice Batrinu — frontend**
 
-Mentenanța asistată de AI este consemnată în istoricul ulterior al proiectului; nu este prezentată drept funcționalitate originală a concursului.
+
