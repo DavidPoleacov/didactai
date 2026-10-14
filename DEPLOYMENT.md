@@ -1,118 +1,31 @@
-# Streamlit Cloud Deployment Guide
+# Deployment notes
 
-## Quick Deploy
+The lightweight local build was tested with Python 3.12.14 and scikit-learn 1.9.0. This audit did not deploy to Community Cloud or execute Docker. A local pass does not guarantee a cloud deployment will fit the platform's resource limits.
 
-1. **Push to GitHub** (already done ✓)
-   ```bash
-   git push
-   ```
+## Local recording
 
-2. **Go to Streamlit Cloud** 
-   - Visit: https://streamlit.io/cloud
-   - Click "New app"
-   - Select this repository
-   - Set main file path to: `app.py`
-   - Click "Deploy"
+Follow `docs/demo_guide.md`. Install `requirements-light.txt` in a fresh environment to keep the optional TensorFlow path disabled. Run the behavioral suite and `python diagnose.py`, then `streamlit run app.py`.
 
-## If You See "Error installing requirements"
+## Streamlit Community Cloud
 
-### Solution 1: Check Status (First Try)
-- Click **"Manage App"** button on the error page
-- Look at the **Deployment** tab for details
-- Common reasons:
-  - Network timeout during TensorFlow download (too large)
-  - Memory constraints during build
-  - Package version conflicts
+Community Cloud discovers a dependency file with a recognized filename. `requirements-light.txt` is an alternative for local pip installation; its presence does not select it for a cloud deployment.
 
-### Solution 2: Restart Deployment
-- Click **"Reboot app"** in the Manage App menu
-- This sometimes fixes transient network issues
+For a lightweight deployment, use a deployment branch or copy whose **requirements.txt contains the contents of requirements-light.txt**. Keep `app.py`, `.streamlit/config.toml`, the `src` modules, the classical model artifacts, `data/processed/exercises_augmented.csv` and `data/processed/exercise_review_flags.csv`. Select `app.py` as the entrypoint and the same Python version you tested locally.
 
-### Solution 3: View Build Logs
-In **Manage App → Deployment** tab:
-- Click on the failed deployment
-- Look for the exact error message
-- Common issues:
-  ```
-  ERROR: pip's dependency resolver does not currently take into account
-  ```
-  This means a package version conflict. We're handling this now.
+For the full optional build, retain the ordinary `requirements.txt`. TensorFlow installation and inference need their own verification. The app can use its two classical models and pedagogical rules without neural inference.
 
-### Solution 4: Alternative - Lighter Requirements
-If tensorflow-cpu still fails, use this lighter version:
+After deployment, verify the exact build from a signed-out browser: launch, a hint, incorrect/correct scalar responses, next-exercise navigation and session history. Use the actual build logs to investigate a failure.
 
-Edit `requirements.txt` to:
-```
-streamlit==1.35.0
-pandas==2.1.4
-numpy==1.24.3
-openpyxl==3.1.1
-scikit-learn==1.3.2
-joblib==1.3.2
-# Optional: remove tensorflow-cpu for faster cloud deployment
-# The app will still work with fallback to rule-based recommendations
-```
+Official documentation: [dependency discovery](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies) and [file organization](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/file-organization).
 
-The app is designed to **gracefully degrade** - it works without TensorFlow!
+## Artifact compatibility and startup
 
-### Solution 5: Clear Streamlit Cache (User Side)
-Users can clear their browser cache:
-1. Streamlit → Settings (top right)
-2. "Clear cache"
-3. Refresh the page
+Both requirement files pin scikit-learn 1.9.0, matching the saved joblib artifacts. Other dependencies use ranges. The artifacts loaded and reproduced their scores in the tested environment; this is not a full dependency lock or a compatibility promise for every environment. See [scikit-learn's persistence guidance](https://scikit-learn.org/stable/model_persistence.html).
 
-## File Structure for Cloud
+Normally the app loads the supplied models. If required classical assets are missing, the report is invalid, or its row count differs from the dataset, startup calls `train_all()` and writes regenerated CSVs/models. If TensorFlow is present but the neural model is absent, the optional startup helper attempts training. Keep the supplied artifacts for the recorded build and document intentional retraining.
 
-Your repository needs these files for Streamlit Cloud:
-```
-repo/
-├── app.py                    # ✓ Main app file
-├── requirements.txt          # ✓ Python dependencies (fixed)
-├── .streamlit/config.toml    # ✓ Streamlit configuration
-├── .streamlit/secrets.toml   # ✓ Secrets (currently empty)
-├── packages.txt              # ✓ System dependencies (graphviz)
-├── data/processed/           # ✓ Datasets
-├── models/                   # ✓ Pre-trained models
-└── src/                      # ✓ Python modules
-```
+The practice filter excludes flagged normalized problem IDs without altering training CSVs or saved models. Retain the flag file when deploying. It does not establish that all unflagged items have undergone teacher review.
 
-All these are present ✓
+## Docker
 
-## Performance Optimization
-
-The current setup uses:
-- `tensorflow-cpu` (smaller than GPU version)
-- Pre-trained models (no training on deployment)
-- Cached asset loading
-- Pandas operations (efficient)
-
-This should work fine on Streamlit Cloud's free tier (1GB RAM).
-
-## Next Steps
-
-1. **Wait 5-10 minutes** after pushing - Streamlit Cloud takes time to detect changes
-2. **Try the deployment link** again
-3. If it still fails → Copy the **exact error message** and share it
-4. The app will show helpful error messages if something fails
-
-## Local Testing (Confirm Before Deploy)
-
-```bash
-cd /workspaces/didactai
-python diagnose.py          # Check all components
-streamlit run app.py        # Test locally
-```
-
-If both pass, the cloud deployment should work.
-
-## Architecture
-
-The app includes graceful fallback:
-- ✓ Neural model available → use neural predictions
-- ✓ Neural model unavailable → use rule-based feedback
-- Either way, the tutor experience works!
-
----
-
-**Last updated:** After neural model integration
-**Status:** Ready for Streamlit Cloud deployment
+`bash run_docker.sh` builds a Python 3.11 image from full `requirements.txt`. Docker was not tested here and differs from the verified Python 3.12 lightweight environment. Verify it separately if offering it as your executable demonstration.

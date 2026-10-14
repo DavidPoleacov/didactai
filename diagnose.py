@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 """
-Comprehensive diagnostic script for the DidactAI Streamlit app.
-Run this to verify all components are working correctly.
+Startup checks for the DidactAI Streamlit app.
+Use the unittest suite for interactive behavior; neural inference is opt-in.
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -15,7 +16,7 @@ def check_section(title):
     print(f"  {title}")
     print(f"{'='*60}")
 
-def test_imports():
+def test_imports(include_neural=False):
     """Test all required imports."""
     check_section("1. Testing Imports")
     
@@ -25,8 +26,9 @@ def test_imports():
         "numpy": "Numerical computing",
         "sklearn": "Scikit-learn ML library",
         "joblib": "Model serialization",
-        "tensorflow": "Neural network framework",
     }
+    if include_neural:
+        imports_to_test["tensorflow"] = "Optional neural network framework"
     
     failed = []
     for module_name, description in imports_to_test.items():
@@ -86,6 +88,9 @@ def test_assets():
             print(f"  ✗ Missing columns: {missing}")
             return False
         print(f"  ✓ All critical columns present")
+        from src.exercise_bank import load_practice_bank
+        practice = load_practice_bank(data, ROOT / "data/processed/exercise_review_flags.csv")
+        print(f"  ✓ Practice bank: {len(practice)} available, {len(data)-len(practice)} excluded for review")
         return True
     except Exception as e:
         print(f"  ✗ Asset loading failed: {e}")
@@ -142,23 +147,26 @@ def test_streamlit_config():
     if secrets_file.exists():
         print(f"  ✓ secrets.toml exists")
     else:
-        print(f"  ✗ secrets.toml missing")
-        return False
+        print("  - secrets.toml absent (no secrets are needed by this app)")
     
     return True
 
-def test_data_files():
+def test_data_files(include_neural=False):
     """Test that all required data files exist."""
     check_section("6. Testing Data Files")
     
     required_files = {
         "data/processed/exercises_augmented.csv": "Main dataset",
-        "models/neural_student_state_model.keras": "Neural model",
-        "models/neural_student_state_scaler.joblib": "Feature scaler",
-        "models/neural_student_state_label_encoder.joblib": "Label encoder",
+        "data/processed/exercise_review_flags.csv": "Practice exclusions",
         "models/structured_difficulty_model.joblib": "Difficulty model",
         "models/unstructured_domain_model.joblib": "Domain model",
     }
+    if include_neural:
+        required_files.update({
+            "models/neural_student_state_model.keras": "Neural model",
+            "models/neural_student_state_scaler.joblib": "Feature scaler",
+            "models/neural_student_state_label_encoder.joblib": "Label encoder",
+        })
     
     missing = []
     for file_path, description in required_files.items():
@@ -177,27 +185,30 @@ def main():
     print("  DidactAI Streamlit App - Diagnostic Report")
     print("="*60)
     
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--neural", action="store_true", help="Also run optional TensorFlow inference")
+    args = parser.parse_args()
     results = {
-        "Imports": test_imports(),
+        "Imports": test_imports(args.neural),
         "Project Imports": test_project_imports(),
         "Assets": test_assets(),
-        "Neural Model": test_neural_model(),
+        "Neural Model": test_neural_model() if args.neural else None,
         "Streamlit Config": test_streamlit_config(),
-        "Data Files": test_data_files(),
+        "Data Files": test_data_files(args.neural),
     }
     
     check_section("Summary")
     passed = sum(1 for v in results.values() if v)
-    total = len(results)
+    total = sum(v is not None for v in results.values())
     
     for test_name, result in results.items():
-        status = "✓ PASS" if result else "✗ FAIL"
+        status = "- SKIP" if result is None else "✓ PASS" if result else "✗ FAIL"
         print(f"  {status:8} - {test_name}")
     
     print(f"\n  Results: {passed}/{total} tests passed\n")
     
     if passed == total:
-        print("  ✓✓✓ All diagnostics passed! App should work correctly.")
+        print("  ✓ Mandatory startup checks passed. Run the behavioral tests before recording.")
         print("\n  To run the app, execute:")
         print("    streamlit run app.py\n")
         return 0
