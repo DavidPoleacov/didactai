@@ -1,4 +1,6 @@
-# Maker Portfolio Notes
+# Historical project notes (archived; not current user documentation)
+
+> This file preserves application-era preparation notes only. It is not a current README, not a source of current feature or metric claims, and is not linked from the public project README. Later maintenance is not represented as original competition work.
 
 ## Project Description
 
@@ -9,9 +11,9 @@ This portfolio describes the repository as it exists now. The conservative answe
 ## Team Contributions
 
 - David Poleacov worked on the backend.
-- His teammate worked on the frontend. Add the teammate’s name and confirm the exact split of work with the authors before submission.
+- Beatrice Batrinu worked on the frontend.
 
-These attributions come from the project authors’ description, not from commit metadata. Avoid assigning individual ownership of particular commits or files until the team confirms it.
+These attributions come from the project authors’ description, not from commit metadata. They do not identify ownership of particular commits or files.
 
 ## Technical Decisions Visible In The Repository
 
@@ -72,7 +74,7 @@ Do not present newly captured images as historical competition screenshots. Avoi
 
 ## Author Input Needed
 
-- Teammate’s name and the agreed description of each person’s contribution.
+- The recorded contributor roles are David Poleacov — backend and Beatrice Batrinu — frontend.
 - Which exact commit, code snapshot, and features correspond to the competition submission, and the competition date.
 - Confirmation of the dataset source/permission and any manual curation not documented in the repository.
 - Whether any real students ever used the prototype; if so, what evidence and consent/data-handling records exist. No such evidence is established by this repository.

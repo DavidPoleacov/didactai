@@ -286,7 +286,7 @@ def summarize_dataset(data: pd.DataFrame) -> Dict:
             "mean": float(data["problem_words"].mean()),
             "max": float(data["problem_words"].max()),
         },
-        "dataset_decision": "Usable for a strong competition MVP because it contains Romanian math problem text, solutions, topic labels, and difficulty labels. Not production-grade: it is small, topic labels were noisy before normalization, and there are exact duplicates/missing labels; the code explicitly cleans these and reports the limitations.",
+        "dataset_decision": "A small prototype dataset with Romanian math problem text, solutions, topic labels, and difficulty labels. It has generated-template overlap and requires independent external review before generalization or learning-outcome claims.",
     }
 
 

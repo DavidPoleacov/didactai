@@ -1,0 +1,60 @@
+row_id,problem_hash,reason
+3,"intr-o zi de luni vanzarile unui magazin au fost de 10200 lei, iar marti - de 11730 lei. determinati cu cate procente au crescut vanzarile","Percentage requested, but the stored key is a ratio: 0.15 instead of 15%."
+10,"fie expresia e(x) = (1/(x-4)) : ((x+4)/(4x-16)) + (x²-4x)/(x²-16). aratati ca e(x) = 1, pentru orice x ∈ r \ {-4; 4}","Proof requested; the checker cannot verify a proof from the final identity."
+13,"fie un paralelogram. unul dintre unghiuri este egal cu (3x+20)° iar celalat unghi este egal cu x°. determina valoarea lui x","Angle relationship is not explicitly given and the key gives units for x."
+16,"determinati solutiile reale ale ecuatiei 3x^2 + 4x - 4 = 0, care apartin intervalului [-sqrt(2); sqrt(2)].","Excel date corruption: stored 2026-03-02 instead of the solution 2/3."
+40,"determinati inversul solutiei reale nenule a ecuatiei 4x^2 - 3x = 0.","Excel date corruption: stored 2026-03-04 instead of the inverse 4/3."
+45,"fie expresia e(x) = (2x^3 + 3x^2 - 2x) / ((2x+1)(1-x)-1). aratati ca pentru orice valoare naturala nenula a lui x, valoarea e(x) este un numar intreg negativ.","Proof requested; the checker cannot verify a proof from the final identity."
+47,determinati masura unghiului ∠bac intr-o figura geometrica,Missing figure and a placeholder key.
+48,alegeti semnul corect al inecuatiei pentru f(0)·f(4) relativ la 0,Missing function/figure and a placeholder key.
+55,"determinati perimetrul triunghiului bmc: triunghi dreptunghic abc (ab=6cm, bc=8cm, mediana bm)","The right-angle location is omitted; if B is the right angle, perimeter BMC is 18 cm, not the stored 14 cm."
+57,inaltimea unei piramide patrate regulate cu muchia de 4 cm,Ambiguous pyramid edge and placeholder key.
+59,"calculati a = 4⁻¹/³ si b = (-6)². determinati a, b si a·b.","Multi-part task: the key omits the requested product a*b."
+60,"in cerc, arcul minor ac = 2 cm si ∠abc = 60°. gasiti masura arcului si circumferinta cercului.","Placeholder key, not the requested arc and circumference."
+65,un cub metalic cu latura 4 cm este scufundat intr-un vas prismatic cu baza 8 cm. determinati cresterea nivelului apei.,The prism base shape/area is not specified.
+67,"in cerc, arcul minor ac si ∠abc = 60°. calculati masura arcului si circumferinta.","Missing arc length and placeholder circumference key."
+72,x real: suma x + x/(x-1) = produsul lor,Wrong unit/key: the equality is an identity for every x other than 1; key says 1 cm.
+73,determinati masura unghiului in figura geometrica data,Missing figure and an unrelated key.
+74,analizati functia si determinati proprietatile ei,Missing function and an unrelated key.
+75,calculati valoarea expresiei aritmetice date,Missing expression and an unrelated key.
+77,calculati volumul cilindrului cu raza si inaltimea date. v = 108π cm³,Required cylinder dimensions are absent; the solution is embedded in the prompt.
+78,simplificati expresia algebrica data,Missing expression and placeholder key.
+79,"din 1,8 kg struguri se obtin 0,45 kg stafide. cate kg struguri pentru x kg stafide?","The variable x is not specified; the requested answer should depend on x, not always be 20 kg."
+81,"geometrie: ab = 2 cm, bc = 4 cm. calculati aria trapezului.",Insufficient trapezium data and placeholder key.
+82,"rezolvati sistemul: 2x + 20 = 3(x - 1), gasiti x = 23","The answer is already embedded in the prompt; review the original task."
+83,calculati aria sau perimetrul figurii geometrice,Missing figure and placeholder key.
+84,"rezolvati inecuatia -3x + 8 ≥ 0. multimea solutiilor: {0, 1, 2}","No natural-number restriction: the full real solution is x<=8/3, not only {0,1,2}."
+85,"factorizati expresia: (x-3)(x²-9)/(x+2) → 5x(x+3)","False simplification: at X=0 the expression is +27/2 while the claimed result is 0."
+87,"in triunghiul abc, mn ∥ ac, bc = 12 cm, nc = 8 cm, bm = 5 cm. gasiti bn si am.","Multi-part task: the key omits AM (which is 10 cm under the stated configuration)."
+92,"aria unui romb cu unghi de 60° si diagonala mica de 4 cm","Placeholder key, not the rhombus area."
+95,"piramida patrata (baza 6 cm, h=2 cm) topita intr-o prisma (baza 2 cm). gasiti inaltimea prismei.",The destination prism base shape/area is not specified.
+96,"simplificati (2x³-3x²+2x-3)/(2x²-5x+3)","Placeholder key, not the simplified expression."
+102,intersectia domeniilor d₁ ∩ d₂ pentru functiile date,Missing functions and placeholder key.
+104,"demonstrati ca (2x⁴-2x²) este patrat perfect pentru x∈ℕ\{1}","False universal claim: X=2 gives 24, which is not a perfect square."
+105,simplificati expresia algebrica,Missing expression and placeholder key.
+106,"in romb, determinati masura unghiului de 40°",Missing diagram/angle identification.
+110,triunghi cu inaltime si unghi de 45°. calculati perimetrul.,Missing triangle measurements and placeholder key.
+114,"parabola cu deschidere in jos, varf pe axa ox. gasiti parametrii.",Missing parabola and parameter information.
+116,"geometria dreptunghiului, unghiuri ∠a = 40°",Missing angle configuration and placeholder key.
+117,identificati semnul functiei patratice f(x)=ax²+bx+c (a=0) si valoarea maxima,Missing parabola data and placeholder key.
+122,"distributie de cereri intre doi operatori: 60 total. un operator a procesat 24, celalalt 36.","The supposed answers are already stated and no clear task is posed."
+124,"comparati volumul unui paralelipiped (1×5×15 cm) cu o bara cilindrica (r=0.5 cm, h=1 m)","Placeholder key, not the comparison of volumes."
+126,"grup turistic: 25 km total, la amiaza parcurs 15 km. ce procent ramane?","Percentage requested, but the key is a ratio: 0.4 instead of 40%."
+128,triunghi isoscel cu unghi la baza 30° si inaltime 1 cm. calculati aria.,The height to be used is unclear and the key is a placeholder.
+294,cristina a economisit 30% din banii primiti si i-au ramas 511 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+296,dan a economisit 30% din banii primiti si i-au ramas 1638 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+297,maria a economisit 25% din banii primiti si i-au ramas 2895 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+301,maria a economisit 25% din banii primiti si i-au ramas 1350 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+302,andreea a economisit 10% din banii primiti si i-au ramas 1602 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+303,diana a economisit 30% din banii primiti si i-au ramas 1099 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+305,diana a economisit 8% din banii primiti si i-au ramas 3726 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+307,ioana a economisit 12% din banii primiti si i-au ramas 2420 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+310,mihai a economisit 30% din banii primiti si i-au ramas 504 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+313,liviu a economisit 10% din banii primiti si i-au ramas 2385 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+315,adrian a economisit 10% din banii primiti si i-au ramas 1854 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+318,sergiu a economisit 5% din banii primiti si i-au ramas 1463 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+320,ana a economisit 30% din banii primiti si i-au ramas 1302 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+321,adrian a economisit 20% din banii primiti si i-au ramas 3640 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+322,maria a economisit 25% din banii primiti si i-au ramas 240 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+328,diana a economisit 20% din banii primiti si i-au ramas 2632 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.
+330,ilinca a economisit 20% din banii primiti si i-au ramas 2640 lei. determinati suma initiala.,Ambiguous savings wording: specify whether the remaining amount excludes the saved money.

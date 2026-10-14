@@ -11,10 +11,16 @@ import unicodedata
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
+from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 import pandas as pd
+
+try:
+    from .exercise_bank import load_review_flag_hashes
+except ImportError:
+    from exercise_bank import load_review_flag_hashes
 
 DIFF_ORDER = ["1 - bază", "2 - mediu", "3 - consolidare", "4 - avansat"]
 METACOGNITIVE_QUESTIONS = [
@@ -59,23 +65,40 @@ def _answer_text(value) -> str | None:
             return None
     except (TypeError, ValueError):
         pass
-    return str(value)
+    text = str(value).strip()
+    if text.casefold() in {"nan", "none", "null", "<na>"}:
+        return None
+    return text
+
+
+def _is_malformed_numeric_key(value: str) -> bool:
+    candidate = value
+    if "=" in candidate:
+        if candidate.count("=") != 1:
+            return False
+        label, candidate = candidate.split("=", maxsplit=1)
+        if not _LABEL_PATTERN.fullmatch(label):
+            return False
+    if _NUMERIC_LIKE_PATTERN.fullmatch(candidate):
+        return _parse_rational(candidate) is None
+    match = _NUMBER_AT_START.match(candidate)
+    return bool(match and _parse_rational(match.group("number")) is None)
 
 
 def _parse_rational(value: str) -> Fraction | None:
-    if _FRACTION_PATTERN.fullmatch(value):
-        numerator, denominator = value.split("/", maxsplit=1)
-        denominator_value = int(denominator)
-        if denominator_value == 0:
-            return None
-        return Fraction(int(numerator), denominator_value)
-    if _DECIMAL_FULL_PATTERN.fullmatch(value):
-        try:
+    try:
+        if _FRACTION_PATTERN.fullmatch(value):
+            numerator, denominator = value.split("/", maxsplit=1)
+            denominator_value = int(denominator)
+            if denominator_value == 0:
+                return None
+            return Fraction(int(numerator), denominator_value)
+        if _DECIMAL_FULL_PATTERN.fullmatch(value):
             return Fraction(Decimal(value.replace(",", ".")))
-        except InvalidOperation:
-            return None
-    if re.fullmatch(_INTEGER_PATTERN, value):
-        return Fraction(int(value), 1)
+        if re.fullmatch(_INTEGER_PATTERN, value):
+            return Fraction(int(value), 1)
+    except (InvalidOperation, ValueError, ZeroDivisionError):
+        return None
     return None
 
 
@@ -113,9 +136,34 @@ def _looks_like_numeric_key(value: str) -> bool:
     return bool(_NUMERIC_LIKE_PATTERN.fullmatch(scalar))
 
 
+def _has_unsupported_numeric_unit(value: str) -> bool:
+    scalar = value
+    labeled = "=" in scalar
+    if labeled:
+        if scalar.count("=") != 1:
+            return False
+        label, scalar = scalar.split("=", maxsplit=1)
+        if not _LABEL_PATTERN.fullmatch(label):
+            return False
+    match = _NUMBER_AT_START.match(scalar)
+    if not match:
+        return False
+    suffix = scalar[match.end():]
+    if not suffix:
+        return False
+    # A suffix on a labeled scalar or a whitespace-delimited unit is not
+    # accepted as exact text when the unit is outside the supported list.
+    return labeled or suffix[:1].isspace()
+
+
 def answer_result_is_verified(result: Dict) -> bool:
     """Return whether an answer result is a definite correct/incorrect verdict."""
     return result.get("status") in {"correct", "incorrect"}
+
+
+def tutor_answer_can_be_recorded(result: Dict, exercise_completed: bool) -> bool:
+    """Guard Tutor state changes against unverified answers and duplicate completion."""
+    return answer_result_is_verified(result) and not exercise_completed
 
 
 def evaluate_answer(student_answer: str, expected_answer: str) -> Dict:
@@ -131,21 +179,28 @@ def evaluate_answer(student_answer: str, expected_answer: str) -> Dict:
     expected = normalize_answer(expected_text or "")
 
     status = "needs_review"
-    if expected_text is None or not expected:
-        status = "invalid_key"
-        feedback = "Cheia de răspuns lipsește sau este goală; acest răspuns nu poate fi evaluat."
-    elif not student:
+    if not student:
         status = "no_answer"
         feedback = "Nu ai introdus încă un răspuns. Începe cu ce se cere și cu datele cunoscute."
+    elif expected_text is None or not expected:
+        status = "invalid_key"
+        feedback = "Cheia de răspuns lipsește sau este goală; acest răspuns nu poate fi evaluat."
+    elif len(expected) > 4096:
+        status = "invalid_key"
+        feedback = "Cheia depășește limita pentru verificarea automată; este necesară verificarea manuală."
+    elif _is_malformed_numeric_key(expected):
+        status = "invalid_key"
+        feedback = "Cheia numerică este malformată și nu poate fi evaluată în siguranță."
+    elif len(student) > 4096:
+        feedback = "Răspunsul este prea lung pentru verificarea automată; este necesară verificarea manuală."
     else:
         expected_scalar = _parse_scalar(expected)
         student_scalar = _parse_scalar(student)
-        if student == expected:
+        if student == expected and expected_scalar is None and _has_unsupported_numeric_unit(expected):
+            feedback = "Unitatea sau formatul numeric nu este recunoscut; răspunsul necesită clarificare."
+        elif student == expected:
             status = "correct"
             feedback = "Răspunsul se potrivește cu cheia. Acum justifică metoda, nu doar rezultatul."
-        elif expected_scalar is None and _looks_like_numeric_key(expected):
-            status = "invalid_key"
-            feedback = "Cheia numerică nu este validă; acest răspuns nu poate fi evaluat."
         elif expected_scalar is not None and student_scalar is not None:
             expected_label, expected_value, expected_unit = expected_scalar
             student_label, student_value, student_unit = student_scalar
@@ -171,27 +226,38 @@ def evaluate_answer(student_answer: str, expected_answer: str) -> Dict:
 
 
 def split_solution_steps(solution: str) -> List[str]:
-    text = "" if pd.isna(solution) else str(solution)
+    text = "" if solution is None or pd.isna(solution) else str(solution).strip()
+    if not text:
+        return []
     # Split on semicolons, line breaks, or sentence boundaries while keeping useful chunks.
     parts = re.split(r"(?:\n+|;|\.\s+)", text)
     steps = [p.strip(" .;\n\t") for p in parts if len(p.strip()) >= 4]
-    return steps[:8] if steps else [text[:240]]
+    return steps if steps else [text[:240]]
 
 
 def choose_hint(problem: str, solution_steps: str, mastery: float, hints_used: int) -> Dict:
     steps = split_solution_steps(solution_steps)
-    level = min(max(int(hints_used), 0), 3)
-    if mastery >= 0.75 and level == 0:
-        hint_type = "abstract"
-        hint = "Alege conceptul principal și scrie relația de pornire. Nu calcula încă."
-    elif mastery >= 0.55 and level <= 1:
+    request_number = max(int(hints_used), 1)
+    if request_number == 1:
         hint_type = "guided"
-        hint = f"Următorul pas util: {steps[0]}" if steps else "Scrie datele cunoscute și necunoscuta."
+        if re.search(r"f\(x\)\s*=\s*4x\s*\+\s*12.*f\(0\)", str(problem), re.IGNORECASE):
+            hint = "Înlocuiește x cu valoarea cerută în expresia funcției, apoi respectă ordinea operațiilor. Calculează și adună termenii."
+        else:
+            hint = "Notează datele cunoscute și ce trebuie aflat. Alege relația potrivită și fă primul pas fără să sari direct la rezultat."
+        shown = 0
     else:
-        hint_type = "concrete"
-        idx = min(level, len(steps) - 1)
-        hint = f"Indiciu concret pentru pasul {idx + 1}: {steps[idx]}"
-    return {"hint_type": hint_type, "hint": hint, "shown_solution_steps": level >= 3}
+        step_index = request_number - 2
+        if steps and step_index < len(steps):
+            is_final = step_index == len(steps) - 1
+            hint_type = "soluție completă" if is_final else "pas ghidat"
+            prefix = "Ultimul pas al soluției:" if is_final else f"Pasul {step_index + 1}:"
+            hint = f"{prefix} {steps[step_index]}"
+            shown = step_index + 1
+        else:
+            hint_type = "guided"
+            hint = "Nu există alți pași salvați pentru acest exercițiu. Încearcă următorul pas folosind datele problemei."
+            shown = len(steps)
+    return {"hint_type": hint_type, "hint": hint, "shown_solution_steps": shown}
 
 
 def diagnose_learning_state(correct: bool, hints_used: int, attempts: int, time_seconds: int) -> Dict:
@@ -246,26 +312,41 @@ def target_difficulty_from_mastery(mastery: float, correct: bool) -> str:
 
 def generate_diagnostic_bank(data: pd.DataFrame, n_questions: int = 5, random_state: int = 42) -> List[Dict]:
     """Build a varied diagnostic set from sensible, non-empty exercise rows."""
+    if n_questions <= 0 or data.empty:
+        return []
     candidates = data.copy()
     candidates = candidates[candidates["Domeniu"].notna() & (candidates["Domeniu"] != "Altele")]
-    candidates = candidates[candidates["Problema"].astype(str).str.strip().ne("")]
-    candidates = candidates[candidates["Raspunsul"].astype(str).str.strip().ne("")]
+    valid_markers = {"nan", "none", "null", "<na>"}
+    problem_text = candidates["Problema"].fillna("").astype(str).str.strip()
+    answer_text = candidates["Raspunsul"].fillna("").astype(str).str.strip()
+    candidates = candidates[
+        problem_text.ne("") & ~problem_text.str.casefold().isin(valid_markers)
+        & answer_text.ne("") & ~answer_text.str.casefold().isin(valid_markers)
+    ]
     candidates = candidates.drop_duplicates(subset=["Problema", "Domeniu", "Tema_norm"], keep="first")
 
     if len(candidates) == 0:
         return []
 
+    rng = np.random.default_rng(random_state)
+    domains = list(candidates["Domeniu"].drop_duplicates())
+    rng.shuffle(domains)
+    groups = {
+        domain: candidates[candidates["Domeniu"] == domain].sample(
+            frac=1, random_state=(random_state + sum(ord(ch) for ch in str(domain))) % (2**32 - 1)
+        )
+        for domain in domains
+    }
     bank = []
-    for domain, group in candidates.groupby("Domeniu", sort=True):
-        if len(group) == 0:
-            continue
-        seed = (random_state + sum(ord(ch) for ch in str(domain))) % 100000
-        sample = group.sample(n=min(2, len(group)), random_state=seed)
-        bank.extend(sample.to_dict("records"))
-        if len(bank) >= n_questions:
-            break
-
-    return bank[:n_questions]
+    max_rows = max(len(group) for group in groups.values())
+    for row_number in range(max_rows):
+        for domain in domains:
+            group = groups[domain]
+            if row_number < len(group):
+                bank.append(group.iloc[row_number].to_dict())
+                if len(bank) >= n_questions:
+                    return bank
+    return bank
 
 
 def assess_diagnostic_results(responses: List[Dict], data: pd.DataFrame) -> Dict:
@@ -286,17 +367,30 @@ def assess_diagnostic_results(responses: List[Dict], data: pd.DataFrame) -> Dict
 
     domain_scores = {}
     for domain, stats in scores.items():
-        ratio = stats["correct"] / stats["total"] if stats["total"] else 0.0
+        ratio = stats["correct"] / stats["total"] if stats["total"] else None
         domain_scores[domain] = {
-            "accuracy": round(ratio, 2),
+            "accuracy": round(ratio, 2) if ratio is not None else None,
             "correct": stats["correct"],
             "total": stats["total"],
-            "priority": round(1.0 - ratio, 2),
+            "priority": round(1.0 - ratio, 2) if ratio is not None else None,
+            "status": "tested" if ratio is not None else "untested",
         }
 
     weak_domains = [
-        domain for domain, stats in sorted(domain_scores.items(), key=lambda kv: (kv[1]["priority"], kv[1]["accuracy"]), reverse=False)
-        if stats["total"] >= 1 and stats["accuracy"] < 0.75
+        domain for domain, stats in sorted(
+            domain_scores.items(),
+            key=lambda item: (
+                item[1]["total"] == 0,
+                -(
+                    (scores[item[0]]["total"] - scores[item[0]]["correct"])
+                    / scores[item[0]]["total"]
+                    if scores[item[0]]["total"]
+                    else 0
+                ),
+                str(item[0]),
+            ),
+        )
+        if stats["total"] >= 1 and scores[domain]["correct"] / scores[domain]["total"] < 0.75
     ]
 
     recommended_themes = []
@@ -325,12 +419,18 @@ def recommend_next_exercise(
     Returning a DataFrame keeps the return type consistent for callers in the Streamlit app.
     """
     candidates = data.copy()
+    if "problem_hash" in candidates.columns:
+        review_flags = Path(__file__).resolve().parents[1] / "data" / "processed" / "exercise_review_flags.csv"
+        excluded_hashes = load_review_flag_hashes(review_flags)
+        candidates = candidates[~candidates["problem_hash"].fillna("").astype(str).str.strip().isin(excluded_hashes)]
     if domain:
-        same = candidates[candidates["Domeniu"] == domain]
-        if len(same) >= 3:
-            candidates = same
+        candidates = candidates[candidates["Domeniu"] == domain]
     if exclude_problem:
         candidates = candidates[candidates["Problema"].astype(str) != str(exclude_problem)]
+    if "Problema" in candidates:
+        candidates = candidates[candidates["Problema"].notna() & candidates["Problema"].astype(str).str.strip().ne("")]
+    if "Raspunsul" in candidates:
+        candidates = candidates[candidates["Raspunsul"].notna() & candidates["Raspunsul"].astype(str).str.strip().ne("")]
     exact = candidates[candidates["Dificultate_group"] == target_difficulty]
     if len(exact) > 0:
         candidates = exact

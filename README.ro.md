@@ -1,78 +1,100 @@
 # DidactAI
 
-DidactAI este un prototip de tutor la matematică în limba română, destinat elevilor de gimnaziu și liceu din Republica Moldova. Aplicația Streamlit folosește o bancă de exerciții în română și combină conținut pedagogic prestabilit, reguli explicite și clasificatoare antrenate pe datele exercițiilor.
+DidactAI este un prototip open-source de tutorat la matematică, cu interfață în limba română, construit cu Streamlit. Combină un subset de exerciții disponibil pentru practică, indicii prestabilite, feedback bazat pe reguli și două clasificatoare salvate. Proiectul este destinat experimentării și învățării, nu înlocuiește un profesor.
 
-Acest README descrie starea actuală a repository-ului. Corectările verificatorului de răspunsuri, ale pornirii modelului neural, testele de regresie și documentația de portofoliu din această revizie sunt îmbunătățiri ulterioare competiției; ele nu trebuie prezentate drept funcționalități ale versiunii inițiale fără dovezi din acea versiune.
+## Funcționalități
 
-## Funcționalități implementate
+- Explorează probleme după domeniu și temă în Acasă. Interacțiunile de aici sunt **simulări** și nu schimbă progresul din Tutor.
+- Rezolvă un exercițiu selectat în Tutor AI, cere indicii etapizate din soluții stocate, primește feedback conservator și o sugestie din același domeniu după un răspuns corect verificat.
+- Consultă încercările verificate, indicatorul aproximativ bazat pe reguli și istoricul disponibil în sesiunea curentă în Progres.
+- Completează un diagnostic scurt. Numai răspunsurile clar corecte sau greșite intră în scorurile domeniilor; diagnosticul este separat de istoricul Tutorului.
+- Clasifică domeniul după text și dificultatea după metadatele problemei.
 
-- Selectarea exercițiilor din bancă după domeniu și temă sau pornirea unui exercițiu de tutor dintr-un domeniu selectat.
-- Oferirea unor indicii graduale bazate pe pașii de rezolvare salvați și apoi a unei întrebări reflexive selectate dintr-o listă prestabilită în română.
-- Estimarea stăpânirii printr-o actualizare simplă, bazată pe reguli, și recomandarea unui exercițiu după domeniu și dificultatea-țintă. Selectarea candidatului folosește filtrare și eșantionare după reguli, nu un model ML de clasare a recomandărilor.
-- Clasificarea domeniului și dificultății cu două modele scikit-learn salvate; demo-ul principal afișează predicțiile lor.
-- Estimarea opțională a unei etichete privind starea elevului cu un model neural salvat, dacă TensorFlow este instalat și artefactul poate fi încărcat.
-- Păstrarea istoricului interacțiunilor și a stăpânirii în starea sesiunii Streamlit; nu există cont de utilizator sau istoric de progres într-o bază de date.
+Indiciile și întrebările de reflecție în română sunt prestabilite. Recomandările folosesc reguli simple de domeniu/dificultate și selecție aleatorie cu seed; nu identifică concepții greșite și nu folosesc un model de ranking. Aplicația nu generează explicații cu un LLM și nu analizează răspunsurile la reflecție.
 
-Indiciile, întrebările reflexive, agregarea diagnosticului, actualizarea stăpânirii și majoritatea recomandărilor folosesc conținut prestabilit sau reguli pedagogice. Aplicația nu folosește un LLM, nu generează explicații originale și nu evaluează demonstrații matematice arbitrare.
+## Instalare și pornire rapidă
 
-## Modele de învățare automată
+Python 3.12 este runtime-ul testat. `requirements.txt` este varianta implicită, fără TensorFlow, și fișierul recunoscut de Streamlit Community Cloud. TensorFlow nu este necesar.
 
-**Clasificatorul de dificultate pe date structurate.** Un `RandomForestClassifier` din scikit-learn prezice `Dificultate_group` (`1 - bază`, `2 - mediu`, `3 - consolidare`, `4 - avansat`). Intrările sunt 14 caracteristici numerice (`Itemul`, `Sursa_year`, lungimile enunțului/soluției/răspunsului, numărul de cifre și simboluri matematice și indicatori pentru procente, geometrie, ecuații, radicali, funcții și contexte reale) și câmpurile categorice `Tema_norm`, `Domeniu` și `Sursa_type`. Pipeline-ul impută valorile lipsă, scalează caracteristicile numerice și aplică one-hot encoding câmpurilor categorice.
+**Windows PowerShell sau Command Prompt** (folosește direct Python-ul din mediul virtual; activarea este opțională):
 
-**Clasificatorul domeniului din text.** Un vectorizator TF-IDF și `ComplementNB` prezic `Domeniu` pe baza enunțului problemei în limba română (`Problema`). Modelul clasifică textul; nu îl generează și nu explică problema.
-
-**Clasificator neural opțional al stării elevului.** Un model TensorFlow/Keras de tip feed-forward prezice una dintre clasele `autonomie_buna`, `blocaj`, `progres` sau `supraincarcare`. Cele nouă intrări sunt timpul de lucru, numărul de indicii, numărul de încercări, corectitudinea, numărul de greșeli, dificultatea exercițiului, stăpânirea anterioară, greșelile consecutive și nivelul de ajutor solicitat. Fișierul `data/processed/student_interactions.csv` conține 2.200 de rânduri sintetice. Etichetele și caracteristicile sunt generate prin reguli în `src/neural_student_state_model.py`; nu provin de la elevi reali. Metricile salvate măsoară concordanța cu aceste etichete sintetice, nu progresul în învățare sau performanța pe elevi reali.
-
-Componenta neurală poate selecta dificultatea-țintă folosind o mapare fixă a stărilor prezise. Exercițiul este selectat în continuare prin filtrare după domeniu/dificultate și eșantionare.
-
-## Seturi de date și metrici salvate
-
-Repository-ul conține două seturi distincte de exerciții:
-
-- `data/processed/exercises_processed.csv`: setul procesat legacy, cu 489 de rânduri; 477 au etichete pentru temă și dificultate, iar 51 de rânduri repetă un enunț normalizat.
-- `data/processed/exercises_augmented.csv`: setul augmentat, cu 1.344 de rânduri; toate cele 1.344 au etichete pentru temă și dificultate, iar raportul de evaluare salvat înregistrează zero repetări ale enunțului normalizat.
-
-Clasificatoarele salvate și `models/evaluation_report.json` corespund setului augmentat, nu setului legacy de 489 de rânduri. Metricile următoare sunt preluate din acel raport salvat; sunt metrici de clasificare pe setul de test, nu dovezi ale îmbunătățirii învățării elevilor.
-
-| Sarcină | Set de test | Macro-F1 baseline | Macro-F1 model | Acuratețe model |
-| --- | ---: | ---: | ---: | ---: |
-| Dificultate structurată, 1.344 rânduri sursă | 296 | 0,163 | 0,831 | 0,922 |
-| Domeniu din text, 1.265 rânduri după filtrare | 279 | 0,078 | 0,974 | 0,982 |
-
-`models/neural_student_state_report.json` raportează acuratețe 0,923 și macro-F1 0,914 pe un set de test de 440 de rânduri, extras din setul sintetic de 2.200 de rânduri. Aceste scoruri descriu predicția etichetelor generate prin reguli. Clasificatoarele pentru exerciții folosesc, de asemenea, o singură împărțire train/test și trebuie evaluate pe date externe înainte de a formula concluzii despre generalizare.
-
-## Instalare și pornire
-
-Se recomandă Python 3.11 sau o versiune mai nouă. Dockerfile-ul folosește Python 3.11.
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-light.txt
-streamlit run app.py
+```powershell
+py -3.12 -m venv .venv-demo
+.\.venv-demo\Scripts\python.exe -m pip install -r requirements-light.txt
+.\.venv-demo\Scripts\python.exe -m streamlit run app.py
 ```
 
-Deschide adresa locală afișată de Streamlit (de regulă `http://localhost:8501`). Dependențele lightweight nu includ TensorFlow; tutorul bazat pe reguli și cele două clasificatoare scikit-learn rămân disponibile, iar predicțiile neuronale despre starea elevului sunt omise.
+**Linux/macOS:**
 
-Pentru calea TensorFlow opțională, folosește `python -m pip install -r requirements.txt`. Dacă TensorFlow este disponibil, dar lipsește fișierul modelului neural, pornirea încearcă să îl antreneze din CSV-ul interacțiunilor, generând date sintetice dacă lipsește și CSV-ul. Această antrenare nu este necesară pentru varianta lightweight.
+```bash
+python3.12 -m venv .venv-demo
+.venv-demo/bin/python -m pip install -r requirements-light.txt
+.venv-demo/bin/python -m streamlit run app.py
+```
 
-În mod normal, aplicația încarcă modelele și CSV-ul augmentat din repository. Dacă lipsesc artefactele modelelor clasice, raportul este invalid sau numărul de rânduri din raport nu corespunde setului, `app.py` apelează `train_all()`. Funcția reconstruiește ambele CSV-uri procesate din fișierele Excel brute și reantrenează modelele clasice, scriind artefacte și rapoarte. Această cale de rezervă modifică fișiere locale; păstrează copii ale artefactelor pe care dorești să le conservi înainte de activarea ei.
-
-Pentru Docker, rulează `./run_docker.sh`; imaginea se construiește din `requirements.txt`, inclusiv TensorFlow. Pentru suita de regresie:
+Deschide URL-ul local afișat de Streamlit (de regulă `http://localhost:8501`). Verifică proiectul înainte de pornire:
 
 ```bash
 python -m unittest discover -s tests -v
+python diagnose.py
 ```
 
-## Limitele verificării răspunsurilor
+`requirements-demo.lock` păstrează setul exact de dependențe Linux/Python 3.12.3 folosit la verificare; este un snapshot specific platformei, în timp ce fișierele requirements declară intervalele de instalare acceptate.
 
-Verificatorul acceptă un răspuns complet, egal după normalizare, sau echivalența rațională exactă pentru răspunsuri scalare acceptate. Formatele numerice acceptate includ numere întregi, valori cu semn, fracții, zecimale cu punct și zecimale cu virgulă românească. La compararea scalară, etichetele variabilelor și unitățile recunoscute trebuie să coincidă; conversia unităților nu este implementată. Spațiile dintre tokenuri distincte sunt păstrate, iar verificatorul nu execută inputul elevului.
+Pentru inferență TensorFlow opțională, instalează `requirements-neural.txt`. Inferența neurală rulează numai dacă TensorFlow și modelul neural salvat sunt disponibile. Lipsa modelului nu declanșează antrenarea la pornire. Recrearea modelelor este o operație explicită de dezvoltare: `python src/train_models.py` (modelele clasice și rapoartele) sau `python src/neural_student_state_model.py` (modelul neural).
 
-Verificatorul returnează `needs_review` pentru echivalențe simbolice pe care nu le poate demonstra, răspunsuri cu mai multe componente, intervale/mulțimi, text liber, unități nesuportate și formate ambigue. O cheie numerică lipsă sau malformată returnează `invalid_key`; un răspuns gol returnează `no_answer`. Aceste rezultate neverificate nu modifică stăpânirea, numărul de greșeli, predicțiile neuronale sau jurnalul de sesiune. Echivalența simbolică generală și evaluarea demonstrațiilor nu sunt implementate.
+## Cum funcționează interfața
 
-## Echipa și starea proiectului
+- **Acasă:** filtrează banca de practică și vezi predicțiile pentru domeniu/dificultate. Răspunsurile, indiciile și recomandările de aici sunt simulări etichetate și nu scriu în progresul Tutorului.
+- **Tutor AI:** alege un domeniu și un exercițiu din bancă sau selecția automată. Răspunsurile clar greșite și corecte sunt încercări distincte. Comparațiile neverificate nu actualizează progresul. Un exercițiu completat corect nu poate fi creditat de două ori.
+- **Progres:** numără încercările verificate și le grupează după domeniul real al exercițiului. Exercițiile distincte completate sunt numărate separat. Indicatorul de stăpânire este o estimare globală aproximativă bazată pe reguli, nu o probabilitate calibrată. Istoricul există numai în sesiunea Streamlit curentă; nu este salvat într-un cont. Data de revizuire este doar orientativă: nu se programează și nu trimite mementouri.
 
-David Poleacov a lucrat la backend. Colegul său/colega sa a lucrat la frontend; numele și împărțirea exactă a contribuțiilor trebuie confirmate de autori înainte de trimitere. Interfața și exercițiile rămân în română pentru elevii vizați; explicațiile în engleză pentru evaluatori sunt în acest README și în `docs/maker_portfolio_notes.md`.
+## Arhitectură și modele
 
-Limitările actuale includ o bancă de exerciții mică și dezechilibrată, etichete normalizate automat, lipsa datelor de interacțiune de la elevi reali, progres păstrat doar în sesiune, lipsa unui verificator simbolic general și posibile diagrame lipsă în unele enunțuri. Modelele joblib salvate se încarcă în mediul verificat, dar emit avertismente de compatibilitate scikit-learn 1.9.0–1.9.1. Versiunile dependențelor nu sunt fixate exact, deci reproducerea artefactelor serializate între medii nu este garantată.
+- `app.py` conține interfața Streamlit și fluxul Tutor cu stare de sesiune.
+- `src/exercise_bank.py` aplică `data/processed/exercise_review_flags.csv` după `problem_hash` normalizat, elimină enunțurile/răspunsurile goale și păstrează indicii CSV originali pentru features și istoric.
+- `src/pedagogical_engine.py` implementează comparația conservatoare a numerelor raționale, indiciile etapizate, scorarea diagnosticului și recomandările simple.
+- Un `RandomForestClassifier` scikit-learn estimează dificultatea folosind metadate: identificatori și sursă, lungimi de enunț/soluție/răspuns, indicatori pentru simboluri matematice și câmpuri categoriale pentru temă, domeniul cunoscut și tipul sursei.
+- Un pipeline TF-IDF/Complement Naive Bayes clasifică domeniul din textul problemelor românești.
+- Un model TensorFlow opțional clasifică interacțiuni dintr-un set sintetic de stări ale elevului. Nu este folosit în instalarea lightweight, iar etichetele sale sunt generate prin reguli, nu provin din observații reale ale elevilor.
+
+## Date și proveniență
+
+`data/processed/exercises_augmented.csv` conține 1.344 de rânduri de antrenare: 1.212 generate și 132 provenite din surse. Fișierul de revizuire exclude 59 de probleme după textul normalizat—42 derivate din surse și 17 probleme ambigue generate despre economii—lăsând 1.285 de exerciții dacă banca rămâne neschimbată. Aceste marcaje semnalează limitări cunoscute; nu înseamnă că toate celelalte exerciții au fost revizuite de profesori. `data/processed/exercises_processed.csv` este un set mai vechi de 489 de rânduri, păstrat pentru proveniență, nu banca activă. Setul sintetic de interacțiuni neuronale are 2.200 de rânduri.
+
+Metricile salvate pentru holdout-urile clasice:
+
+| Clasificator | Rânduri holdout | Acuratețe | Macro-F1 |
+| --- | ---: | ---: | ---: |
+| Dificultate structurată | 296 | 0.922297 | 0.831212 |
+| Domeniu din text | 279 | 0.982079 | 0.974313 |
+
+Raportul setului neural sintetic indică 440 de rânduri de test și acuratețe 0.922727 / macro-F1 0.914048. Aceste scoruri măsoară clasificarea, nu rezultatele învățării. Setul include familii de șabloane asemănătoare între rândurile împărțite aleatoriu; scorurile pot reflecta această suprapunere. Este necesară evaluare externă pe date independente, revizuite de profesori. `python tools/check_generated_math.py` auditează proveniența și limitările fără a executa expresii. `python tools/verify_saved_models.py` reproduce independent holdout-urile clasice salvate.
+
+Graficele active din `assets/` se regenerează din banca CSV și raportul salvate cu `python tools/refresh_figures.py`. Graficele vechi, dacă există în `assets/legacy/`, sunt istorice.
+
+## Testare și mentenanță
+
+```bash
+python -m unittest discover -s tests -v
+python diagnose.py
+python tools/check_generated_math.py
+python tools/verify_saved_models.py
+```
+
+Utilitarele de antrenare sunt operații explicite de dezvoltare și pot suprascrie datele procesate, modelele și rapoartele. Nu sunt rulate la pornirea aplicației, în diagnostice, teste sau demonstrație.
+
+## Limitări actuale
+
+- Verificatorul acceptă text normalizat identic și echivalență exactă de numere raționale cu etichete de variabilă și unități identice. Nu convertește unități și nu demonstrează echivalență simbolică generală, demonstrații, mulțimi, intervale sau text ambiguu.
+- Unele exerciții sunt incomplete, ambigue ori fără diagrame. Marcajele exclud limitări cunoscute, dar nu certifică întreaga bancă printr-un proces de revizie profesorală.
+- Stăpânirea și recomandările folosesc reguli simple; modelul neural opțional prezice etichete sintetice de interacțiune.
+- Nu există conturi salvate, progres persistent, mementouri automate, analiză a reflecțiilor sau rezultate măsurate cu elevi reali.
+- Holdout-urile modelelor sunt împărțiri interne aleatorii, nu evaluări externe independente.
+
+## Contribuitori
+
+- **David Poleacov — backend**
+- **Beatrice Batrinu — frontend**
+
+Mentenanța asistată de AI este consemnată în istoricul ulterior al proiectului; nu este prezentată drept funcționalitate originală a concursului.

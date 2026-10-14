@@ -1,4 +1,6 @@
-# Lecții din jurizare și greșeli evitate
+# Arhivă istorică: lecții din jurizare și greșeli evitate
+
+> Document istoric păstrat pentru proveniență. Afirmațiile de mai jos descriu o versiune veche și nu trebuie citite ca descriere a aplicației curente. Pentru funcționalitatea verificată și metricile salvate, consultă README-ul și documentele curente despre modele și date.
 
 ## Greșeli ale versiunii vechi DidactAI
 

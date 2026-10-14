@@ -1,209 +1,109 @@
-#!/usr/bin/env python
-"""
-Comprehensive diagnostic script for the DidactAI Streamlit app.
-Run this to verify all components are working correctly.
-"""
+#!/usr/bin/env python3
+"""Check required DidactAI assets; run the optional neural check only with --neural."""
+from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
 
-def check_section(title):
-    """Print section header."""
-    print(f"\n{'='*60}")
-    print(f"  {title}")
-    print(f"{'='*60}")
 
-def test_imports():
-    """Test all required imports."""
-    check_section("1. Testing Imports")
-    
-    imports_to_test = {
-        "streamlit": "Streamlit web framework",
-        "pandas": "Data manipulation",
-        "numpy": "Numerical computing",
-        "sklearn": "Scikit-learn ML library",
-        "joblib": "Model serialization",
-        "tensorflow": "Neural network framework",
-    }
-    
-    failed = []
-    for module_name, description in imports_to_test.items():
-        try:
-            __import__(module_name)
-            print(f"  ✓ {module_name:15} - {description}")
-        except ImportError as e:
-            print(f"  ✗ {module_name:15} - FAILED: {e}")
-            failed.append(module_name)
-    
-    return len(failed) == 0
-
-def test_project_imports():
-    """Test project-specific imports."""
-    check_section("2. Testing Project Imports")
-    
-    sys.path.insert(0, str(ROOT))
-    
-    modules_to_test = {
-        "src.pedagogical_engine": "Pedagogical decision engine",
-        "src.model_utils": "ML model utilities",
-        "src.neural_student_state_model": "Neural student state model",
-    }
-    
-    failed = []
-    for module_path, description in modules_to_test.items():
-        try:
-            __import__(module_path)
-            print(f"  ✓ {module_path:40} - {description}")
-        except Exception as e:
-            print(f"  ✗ {module_path:40} - FAILED")
-            print(f"      Error: {str(e)[:80]}")
-            failed.append(module_path)
-    
-    return len(failed) == 0
-
-def test_assets():
-    """Test asset loading."""
-    check_section("3. Testing Asset Loading")
-    
-    import pandas as pd
-    
-    sys.path.insert(0, str(ROOT))
-    from src.model_utils import load_assets
-    
+def run_diagnostics(include_neural: bool = False) -> int:
+    failures = []
     try:
-        structured_model, unstructured_model, data, report = load_assets()
-        print(f"  ✓ Structured model loaded: {type(structured_model).__name__}")
-        print(f"  ✓ Unstructured model loaded: {type(unstructured_model).__name__}")
-        print(f"  ✓ Data loaded: {data.shape[0]} exercises, {data.shape[1]} columns")
-        print(f"  ✓ Report loaded with keys: {list(report.keys())}")
-        
-        # Check critical columns
-        critical_cols = ["Domeniu", "Problema", "Raspunsul", "Dificultate_group"]
-        missing = [c for c in critical_cols if c not in data.columns]
-        if missing:
-            print(f"  ✗ Missing columns: {missing}")
-            return False
-        print(f"  ✓ All critical columns present")
-        return True
-    except Exception as e:
-        print(f"  ✗ Asset loading failed: {e}")
-        return False
+        import joblib  # noqa: F401
+        import numpy  # noqa: F401
+        import pandas  # noqa: F401
+        import sklearn  # noqa: F401
+        import streamlit  # noqa: F401
+        print("PASS required Python dependencies")
+    except ImportError as exc:
+        failures.append(f"Required dependency is missing: {exc}")
+        print(f"FAIL {failures[-1]}")
 
-def test_neural_model():
-    """Test neural model availability."""
-    check_section("4. Testing Neural Model")
-    
-    sys.path.insert(0, str(ROOT))
-    from src.neural_student_state_model import ensure_neural_model_exists, predict_neural_student_state
-    
-    try:
-        # Check model existence
-        result = ensure_neural_model_exists()
-        status = result.get("status")
-        print(f"  ✓ Neural model status: {status}")
-        
-        if status != "ready":
-            print(f"    Reason: {result.get('reason', 'Unknown')}")
-            return False
-        
-        # Test prediction
-        features = {
-            "time_spent_seconds": 45.0,
-            "hint_count": 1.0,
-            "attempt_count": 2.0,
-            "is_correct": 0.0,
-            "mistake_count": 1.0,
-            "exercise_difficulty_encoded": 2.0,
-            "previous_mastery": 0.55,
-            "consecutive_errors": 1.0,
-            "help_level_requested": 1.0,
-        }
-        pred = predict_neural_student_state(features)
-        print(f"  ✓ Neural prediction works: {pred['predicted_state']}")
-        return True
-    except Exception as e:
-        print(f"  ✗ Neural model test failed: {e}")
-        return False
-
-def test_streamlit_config():
-    """Test Streamlit configuration files."""
-    check_section("5. Testing Streamlit Configuration")
-    
-    config_file = ROOT / ".streamlit" / "config.toml"
-    if config_file.exists():
-        print(f"  ✓ config.toml exists")
+    required = [
+        ROOT / "models/structured_difficulty_model.joblib",
+        ROOT / "models/unstructured_domain_model.joblib",
+        ROOT / "models/evaluation_report.json",
+        ROOT / "data/processed/exercises_augmented.csv",
+        ROOT / "data/processed/exercise_review_flags.csv",
+        ROOT / ".streamlit/config.toml",
+    ]
+    missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
+    if missing:
+        failures.extend(f"Required file missing: {name}" for name in missing)
+        for failure in failures:
+            print(f"FAIL {failure}")
     else:
-        print(f"  ✗ config.toml missing")
-        return False
-    
-    secrets_file = ROOT / ".streamlit" / "secrets.toml"
-    if secrets_file.exists():
-        print(f"  ✓ secrets.toml exists")
-    else:
-        print(f"  ✗ secrets.toml missing")
-        return False
-    
-    return True
+        print("PASS required dataset, review flags, saved models, report, and configuration files")
 
-def test_data_files():
-    """Test that all required data files exist."""
-    check_section("6. Testing Data Files")
-    
-    required_files = {
-        "data/processed/exercises_augmented.csv": "Main dataset",
-        "models/neural_student_state_model.keras": "Neural model",
-        "models/neural_student_state_scaler.joblib": "Feature scaler",
-        "models/neural_student_state_label_encoder.joblib": "Label encoder",
-        "models/structured_difficulty_model.joblib": "Difficulty model",
-        "models/unstructured_domain_model.joblib": "Domain model",
-    }
-    
-    missing = []
-    for file_path, description in required_files.items():
-        full_path = ROOT / file_path
-        if full_path.exists():
-            print(f"  ✓ {file_path:45} - {description}")
-        else:
-            print(f"  ✗ {file_path:45} - MISSING")
-            missing.append(file_path)
-    
-    return len(missing) == 0
+    if not failures:
+        try:
+            import pandas as pd
 
-def main():
-    """Run all diagnostics."""
-    print("\n" + "="*60)
-    print("  DidactAI Streamlit App - Diagnostic Report")
-    print("="*60)
-    
-    results = {
-        "Imports": test_imports(),
-        "Project Imports": test_project_imports(),
-        "Assets": test_assets(),
-        "Neural Model": test_neural_model(),
-        "Streamlit Config": test_streamlit_config(),
-        "Data Files": test_data_files(),
-    }
-    
-    check_section("Summary")
-    passed = sum(1 for v in results.values() if v)
-    total = len(results)
-    
-    for test_name, result in results.items():
-        status = "✓ PASS" if result else "✗ FAIL"
-        print(f"  {status:8} - {test_name}")
-    
-    print(f"\n  Results: {passed}/{total} tests passed\n")
-    
-    if passed == total:
-        print("  ✓✓✓ All diagnostics passed! App should work correctly.")
-        print("\n  To run the app, execute:")
-        print("    streamlit run app.py\n")
-        return 0
+            from src.exercise_bank import load_practice_bank
+            from src.model_utils import load_assets, predict_domain_from_text, predict_structured_difficulty
+
+            structured, domain_model, source, report = load_assets()
+            practice = load_practice_bank(
+                source, ROOT / "data/processed/exercise_review_flags.csv",
+            )
+            if len(source) != 1344 or len(practice) != 1285:
+                print(f"INFO dataset rows: source={len(source)}, practice={len(practice)} (content differs from audited snapshot)")
+            sample = practice.loc[[practice.index[0]]]
+            predict_domain_from_text(domain_model, str(sample.iloc[0]["Problema"]))
+            feature_cols = [
+                "Itemul", "Sursa_year", "problem_chars", "problem_words", "steps_chars", "answer_chars",
+                "n_digits", "n_math_symbols", "has_percent", "has_geometry_word", "has_equation_word",
+                "has_radical", "has_function_word", "has_real_life_context", "Tema_norm", "Domeniu", "Sursa_type",
+            ]
+            predict_structured_difficulty(structured, sample[feature_cols])
+            if report.get("dataset", {}).get("rows_total") != len(source):
+                print("WARN saved training report row count differs from current source data")
+            print(f"PASS loaded saved classifiers and made sample inferences; practice rows={len(practice)}")
+        except Exception as exc:
+            failures.append(f"Required saved assets could not be used: {type(exc).__name__}: {exc}")
+            print(f"FAIL {failures[-1]}")
+
+    if include_neural:
+        try:
+            from src.neural_student_state_model import tf, predict_neural_student_state
+
+            if tf is None:
+                raise RuntimeError("TensorFlow is not installed.")
+            neural_paths = [
+                ROOT / f"models/{name}" for name in (
+                    "neural_student_state_model.keras",
+                    "neural_student_state_scaler.joblib",
+                    "neural_student_state_label_encoder.joblib",
+                )
+            ]
+            missing_neural = [str(path.relative_to(ROOT)) for path in neural_paths if not path.is_file()]
+            if missing_neural:
+                raise FileNotFoundError(f"Optional neural artifacts are missing: {', '.join(missing_neural)}")
+            result = predict_neural_student_state({
+                "time_spent_seconds": 45.0, "hint_count": 1.0, "attempt_count": 2.0,
+                "is_correct": 0.0, "mistake_count": 1.0, "exercise_difficulty_encoded": 2.0,
+                "previous_mastery": 0.55, "consecutive_errors": 1.0, "help_level_requested": 1.0,
+            })
+            print(f"PASS requested TensorFlow inference: {result['predicted_state']}")
+        except Exception as exc:
+            failures.append(f"Requested optional neural inference failed: {type(exc).__name__}: {exc}")
+            print(f"FAIL {failures[-1]}")
     else:
-        print("  ✗✗✗ Some diagnostics failed. Check the errors above.")
-        return 1
+        print("SKIP optional TensorFlow inference (rerun with --neural to request it)")
+
+    return 1 if failures else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--neural", action="store_true", help="Require and run the optional TensorFlow inference check.")
+    arguments = parser.parse_args()
+    return run_diagnostics(include_neural=arguments.neural)
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

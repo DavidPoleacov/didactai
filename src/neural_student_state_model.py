@@ -259,10 +259,13 @@ def ensure_neural_model_exists() -> Dict:
     if tf is None or models is None or layers is None or EarlyStopping is None:
         return {"status": "unavailable", "reason": "TensorFlow runtime is not available in this environment."}
     if not (MODELS_DIR / "neural_student_state_model.keras").exists():
-        report = train_neural_student_state_model()
         return {
-            "status": "ready",
-            "model": str(MODELS_DIR / "neural_student_state_model.keras"),
-            "report": report,
+            "status": "missing",
+            "reason": "Neural model artifacts are missing; run the explicit training command to create them.",
         }
     return {"status": "ready", "model": str(MODELS_DIR / "neural_student_state_model.keras")}
+
+
+if __name__ == "__main__":
+    result = train_neural_student_state_model()
+    print(json.dumps(result, ensure_ascii=False, indent=2))

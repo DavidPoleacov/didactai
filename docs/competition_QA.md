@@ -1,6 +1,6 @@
 # Historical Competition Q&A Notes
 
-> Archived Romanian-language preparation notes. They contain time-specific claims and metrics from an earlier project snapshot, and are not verified descriptions of the current app or proof of what was present during the competition. For the current implementation and checked-in metric sources, use `README.md`, `README.ro.md`, and `docs/maker_portfolio_notes.md`. Confirm all historical claims with the authors before reusing them.
+> Archived Romanian-language preparation notes. They contain time-specific claims and metrics from an earlier project snapshot, and are not verified descriptions of the current app or proof of what was present during the competition. For current implementation and checked-in metric sources, use `README.md`, `README.ro.md`, and `docs/model_report.md`. Confirm historical claims before reuse.
 
 ## 1. Problema și relevanța
 
@@ -16,8 +16,9 @@ Matematica cere pași, justificare și transfer. Un sistem care dă imediat solu
 **Ce obiectiv măsurabil urmărim?**  
 Obiectivul MVP: clasificarea automată a domeniului curricular din text și estimarea dificultății din date structurate, apoi folosirea lor într-o recomandare adaptivă. Măsurăm macro-F1, accuracy, balanced accuracy, comparație cu baseline, rata de erori și demonstrație live în Streamlit.
 
-**Cum știm că proiectul a avut succes?**  
-Succesul pentru olimpiadă este: aplicație funcțională, ambele modele integrate, metrici calculate reproductibil, baseline depășit, EDA și limitări afișate. În raportul curent, modelul structurat are macro-F1 0.686 față de baseline 0.180; modelul text are macro-F1 0.876 față de baseline 0.071.
+**Cum era evaluat succesul în acel snapshot?**
+
+Notele de atunci descriau o aplicație funcțională, două modele integrate, metrici, EDA și limitări. Valorile macro-F1 0.686 și 0.876 de mai jos sunt cifre istorice și nu sunt metricile din raportul curent.
 
 ## 2. Arhitectura soluției ML
 

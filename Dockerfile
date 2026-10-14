@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -16,7 +16,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Copy requirements and install (this will install tensorflow-cpu if available for the platform)
+# The default requirements install the lightweight app without TensorFlow.
 COPY requirements.txt ./requirements.txt
 RUN pip install --upgrade pip setuptools wheel \
     && pip install --no-cache-dir -r requirements.txt

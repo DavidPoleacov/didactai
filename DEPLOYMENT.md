@@ -1,118 +1,39 @@
-# Streamlit Cloud Deployment Guide
+# Local run and optional hosting
 
-## Quick Deploy
+## Local lightweight run
 
-1. **Push to GitHub** (already done ✓)
-   ```bash
-   git push
-   ```
-
-2. **Go to Streamlit Cloud** 
-   - Visit: https://streamlit.io/cloud
-   - Click "New app"
-   - Select this repository
-   - Set main file path to: `app.py`
-   - Click "Deploy"
-
-## If You See "Error installing requirements"
-
-### Solution 1: Check Status (First Try)
-- Click **"Manage App"** button on the error page
-- Look at the **Deployment** tab for details
-- Common reasons:
-  - Network timeout during TensorFlow download (too large)
-  - Memory constraints during build
-  - Package version conflicts
-
-### Solution 2: Restart Deployment
-- Click **"Reboot app"** in the Manage App menu
-- This sometimes fixes transient network issues
-
-### Solution 3: View Build Logs
-In **Manage App → Deployment** tab:
-- Click on the failed deployment
-- Look for the exact error message
-- Common issues:
-  ```
-  ERROR: pip's dependency resolver does not currently take into account
-  ```
-  This means a package version conflict. We're handling this now.
-
-### Solution 4: Alternative - Lighter Requirements
-If tensorflow-cpu still fails, use this lighter version:
-
-Edit `requirements.txt` to:
-```
-streamlit==1.35.0
-pandas==2.1.4
-numpy==1.24.3
-openpyxl==3.1.1
-scikit-learn==1.3.2
-joblib==1.3.2
-# Optional: remove tensorflow-cpu for faster cloud deployment
-# The app will still work with fallback to rule-based recommendations
-```
-
-The app is designed to **gracefully degrade** - it works without TensorFlow!
-
-### Solution 5: Clear Streamlit Cache (User Side)
-Users can clear their browser cache:
-1. Streamlit → Settings (top right)
-2. "Clear cache"
-3. Refresh the page
-
-## File Structure for Cloud
-
-Your repository needs these files for Streamlit Cloud:
-```
-repo/
-├── app.py                    # ✓ Main app file
-├── requirements.txt          # ✓ Python dependencies (fixed)
-├── .streamlit/config.toml    # ✓ Streamlit configuration
-├── .streamlit/secrets.toml   # ✓ Secrets (currently empty)
-├── packages.txt              # ✓ System dependencies (graphviz)
-├── data/processed/           # ✓ Datasets
-├── models/                   # ✓ Pre-trained models
-└── src/                      # ✓ Python modules
-```
-
-All these are present ✓
-
-## Performance Optimization
-
-The current setup uses:
-- `tensorflow-cpu` (smaller than GPU version)
-- Pre-trained models (no training on deployment)
-- Cached asset loading
-- Pandas operations (efficient)
-
-This should work fine on Streamlit Cloud's free tier (1GB RAM).
-
-## Next Steps
-
-1. **Wait 5-10 minutes** after pushing - Streamlit Cloud takes time to detect changes
-2. **Try the deployment link** again
-3. If it still fails → Copy the **exact error message** and share it
-4. The app will show helpful error messages if something fails
-
-## Local Testing (Confirm Before Deploy)
+Use Python 3.12 and the declared lightweight dependencies:
 
 ```bash
-cd /workspaces/didactai
-python diagnose.py          # Check all components
-streamlit run app.py        # Test locally
+python3.12 -m venv .venv-demo
+.venv-demo/bin/python -m pip install -r requirements-light.txt
+.venv-demo/bin/python -m unittest discover -s tests -v
+.venv-demo/bin/python diagnose.py
+.venv-demo/bin/python -m streamlit run app.py
 ```
 
-If both pass, the cloud deployment should work.
+On Windows, use the venv interpreter directly to avoid PowerShell activation-policy issues:
 
-## Architecture
+```powershell
+py -3.12 -m venv .venv-demo
+.\.venv-demo\Scripts\python.exe -m pip install -r requirements-light.txt
+.\.venv-demo\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv-demo\Scripts\python.exe diagnose.py
+.\.venv-demo\Scripts\python.exe -m streamlit run app.py
+```
 
-The app includes graceful fallback:
-- ✓ Neural model available → use neural predictions
-- ✓ Neural model unavailable → use rule-based feedback
-- Either way, the tutor experience works!
+The local Streamlit URL is normally `http://localhost:8501`. TensorFlow is not required.
 
----
+## Streamlit Community Cloud
 
-**Last updated:** After neural model integration
-**Status:** Ready for Streamlit Cloud deployment
+`requirements.txt` includes the lightweight default dependency set and is the repository's recognized requirements file. Select `app.py` as the entrypoint. No secrets file or credentials are needed by this application. Do not configure a nonexistent Cloud setting to choose `requirements-light.txt`.
+
+The optional TensorFlow path is a separate local development installation via `requirements-neural.txt`; Cloud deployment with TensorFlow is not part of the verified demo and is not recommended without separate resource/runtime testing. The app never trains models at startup.
+
+## Docker
+
+`Dockerfile` installs the default lightweight `requirements.txt`. `./run_docker.sh` builds and starts the local container. No deployment is performed by this repository's checks.
+
+## Explicit model development
+
+Normal app startup, tests, and diagnostics load the saved classifiers without retraining. `python src/train_models.py` explicitly rebuilds the classical model/data artifacts. `python src/neural_student_state_model.py` explicitly trains the optional neural model. Both can overwrite files; back up artifacts before running these development commands.

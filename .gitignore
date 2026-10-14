@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+venv/
+env/
+.env
+.streamlit/secrets.toml
+*.zip
+*.whl
+*.tar.gz
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
