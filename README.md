@@ -7,7 +7,7 @@ This README describes the repository as it exists now. The answer-checking and n
 ## What Is Implemented
 
 - Select exercises from the bank by domain and topic, or start a tutor exercise from a selected domain.
-- Start with a general scaffold, then reveal stored solution steps in order. Reflective questions come from a predefined Romanian list; the final stored step can include the answer.
+- Show progressive hints drawn from stored solution steps, followed by a reflective question selected from a predefined Romanian question list.
 - Estimate mastery with a small rule-based update and recommend an exercise by domain and target difficulty. Candidate selection is a rule-based filter and sample, not an ML-ranked recommendation model.
 - Classify exercise domains and difficulty with two saved scikit-learn models; the main demo displays their predictions.
 - Optionally estimate a learner-state label with a saved neural model when TensorFlow is installed and the artifact loads.
@@ -43,10 +43,10 @@ The saved classifiers and `models/evaluation_report.json` correspond to the augm
 
 ## Installation And Startup
 
-The lightweight path was tested on Python 3.12.14. The project declares Python >=3.11; the Dockerfile uses Python 3.11 and was not executed in this audit.
+Python 3.11 or newer is recommended. The Dockerfile uses Python 3.11.
 
 ```bash
-python3.12 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements-light.txt
@@ -59,7 +59,7 @@ To install the optional TensorFlow path instead, use `python -m pip install -r r
 
 The app normally loads the checked-in models and augmented CSV. If required classical-model assets are absent, the report is invalid, or its dataset row count differs, `app.py` calls `train_all()`. That function rebuilds both processed CSVs from the raw workbooks and retrains the classical models, writing artifacts and reports. This fallback changes local files; keep a copy of any artifacts you want to preserve before triggering it.
 
-Run the Docker path with `bash run_docker.sh`; it builds from `requirements.txt`, including TensorFlow. To run the regression suite:
+Run the Docker path with `./run_docker.sh`; it builds from `requirements.txt`, including TensorFlow. To run the regression suite:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -75,15 +75,4 @@ The checker returns `needs_review` for symbolic equivalence it cannot prove, mul
 
 David Poleacov worked on the backend. His teammate worked on the frontend; the teammate’s name and exact contribution split should be confirmed by the authors before submission. The current interface and exercises remain Romanian for the intended students; English explanations for reviewers are in this README and `docs/maker_portfolio_notes.md`.
 
-Current limitations include a small and unevenly distributed exercise bank, automatically normalized labels, no real-student interaction dataset, session-only progress, no general symbolic checker, and possible missing diagrams in some problem statements. The saved joblib models loaded without compatibility warnings with scikit-learn 1.9.0, now pinned in both requirement files. Other dependencies still use ranges; this is not a complete environment lock.
-
-
-## October 2026 Audit Revision
-
-The augmented bank contains 132 source-derived rows and 1,212 rows labelled `Generat` in `Sursa`. An independent numerical-template audit matched all 1,212 generated answer keys; that does not establish that every prompt is unambiguous or pedagogically sound. The audit identified 42 source-derived rows and 17 generated savings prompts needing review. They remain in the training CSV, but `data/processed/exercise_review_flags.csv` excludes them from diagnostic, home, tutor and recommendation candidates. The available practice bank currently contains 1,285 rows. Removing a flag requires reviewing the original prompt, diagrams, answer format and solution.
-
-The corrected tutor retains feedback and hints across reruns, advances with its next-exercise button, and prevents repeated grading of a completed attempt. Session statistics count evaluated attempts, not unique completed exercises. The mastery indicator is a global heuristic, not a calibrated probability or per-topic mastery model. The app only suggests a review date; it does not store a schedule or send reminders.
-
-The October audit changes were prepared with AI assistance after the competition. Review and understand them before attributing any particular implementation decision to yourself. The model artifacts and original training CSVs were preserved. See `docs/audit_report.md`, `docs/audit_changes.md` and `docs/demo_guide.md` for the checks, limitations and recording instructions.
-
-All lightweight functional tests passed; the optional TensorFlow startup unit test is skipped when TensorFlow is absent. Saved neural-network scores were reproduced independently using NumPy and the saved weights. Actual TensorFlow inference could not be verified in the audit environment: even basic TensorFlow addition aborted because process filesystem information was unavailable. Use `python diagnose.py --neural` on your own full installation before demonstrating that optional component.
+Current limitations include a small and unevenly distributed exercise bank, automatically normalized labels, no real-student interaction dataset, session-only progress, no general symbolic checker, and possible missing diagrams in some problem statements. The saved joblib models load in the inspected environment, but emit scikit-learn 1.9.0-to-1.9.1 compatibility warnings. Dependency ranges are not exact pins, so reproducibility of serialized models across environments is not guaranteed.

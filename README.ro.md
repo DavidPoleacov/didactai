@@ -43,10 +43,10 @@ Clasificatoarele salvate și `models/evaluation_report.json` corespund setului a
 
 ## Instalare și pornire
 
-Varianta lightweight a fost verificată cu Python 3.12.14. Proiectul declară Python >=3.11, iar Dockerfile-ul folosește Python 3.11; calea Docker nu a fost executată în acest audit.
+Se recomandă Python 3.11 sau o versiune mai nouă. Dockerfile-ul folosește Python 3.11.
 
 ```bash
-python3.12 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements-light.txt
@@ -59,7 +59,7 @@ Pentru calea TensorFlow opțională, folosește `python -m pip install -r requir
 
 În mod normal, aplicația încarcă modelele și CSV-ul augmentat din repository. Dacă lipsesc artefactele modelelor clasice, raportul este invalid sau numărul de rânduri din raport nu corespunde setului, `app.py` apelează `train_all()`. Funcția reconstruiește ambele CSV-uri procesate din fișierele Excel brute și reantrenează modelele clasice, scriind artefacte și rapoarte. Această cale de rezervă modifică fișiere locale; păstrează copii ale artefactelor pe care dorești să le conservi înainte de activarea ei.
 
-Pentru Docker, rulează `bash run_docker.sh`; imaginea se construiește din `requirements.txt`, inclusiv TensorFlow. Pentru suita de regresie:
+Pentru Docker, rulează `./run_docker.sh`; imaginea se construiește din `requirements.txt`, inclusiv TensorFlow. Pentru suita de regresie:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -75,14 +75,4 @@ Verificatorul returnează `needs_review` pentru echivalențe simbolice pe care n
 
 David Poleacov a lucrat la backend. Colegul său/colega sa a lucrat la frontend; numele și împărțirea exactă a contribuțiilor trebuie confirmate de autori înainte de trimitere. Interfața și exercițiile rămân în română pentru elevii vizați; explicațiile în engleză pentru evaluatori sunt în acest README și în `docs/maker_portfolio_notes.md`.
 
-Limitările actuale includ o bancă de exerciții mică și dezechilibrată, etichete normalizate automat, lipsa datelor de interacțiune de la elevi reali, progres păstrat doar în sesiune, lipsa unui verificator simbolic general și posibile diagrame lipsă în unele enunțuri. Modelele joblib s-au încărcat fără avertismente cu scikit-learn 1.9.0, versiune fixată acum în ambele fișiere de dependențe. Celelalte dependențe folosesc intervale; nu există un lock complet al mediului.
-
-## Revizia de audit din octombrie 2026
-
-Banca augmentată are 132 de rânduri derivate din surse și 1.212 rânduri etichetate `Generat`. Verificarea independentă a șabloanelor numerice a confirmat cele 1.212 chei generate, fără să valideze automat claritatea enunțurilor. 42 de rânduri din surse și 17 enunțuri generate despre economisire necesită revizuire. Fișierul `data/processed/exercise_review_flags.csv` le exclude din practica elevului și din recomandări, păstrând CSV-urile de antrenare. Sunt disponibile 1.285 de exerciții pentru practică.
-
-Feedbackul și indiciile tutorului se păstrează între clickuri. Butonul pentru exercițiul următor funcționează, iar o încercare deja rezolvată corect nu primește credit repetat prin retrimitere. Statisticile numără încercări evaluate. Indicatorul global de stăpânire este euristic; data de recapitulare este doar o sugestie, fără calendar salvat sau notificări.
-
-Corectările din acest audit au fost pregătite cu asistență AI, ulterior competiției. Autorii trebuie să le înțeleagă și să atribuie corect contribuțiile. Artefactele modelelor și CSV-urile originale de antrenare au fost păstrate. Detalii: `docs/audit_report.md`, `docs/audit_changes.md`, `docs/demo_guide.md`.
-
-Testele funcționale lightweight au trecut. Scorurile rețelei neuronale salvate au fost reproduse independent din ponderi, cu NumPy. Inferența efectivă TensorFlow nu a putut fi verificată în mediul de audit, unde inclusiv o adunare simplă TensorFlow se oprește din cauza informațiilor de proces indisponibile. Verificați local cu `python diagnose.py --neural` înainte să demonstrați componenta opțională.
+Limitările actuale includ o bancă de exerciții mică și dezechilibrată, etichete normalizate automat, lipsa datelor de interacțiune de la elevi reali, progres păstrat doar în sesiune, lipsa unui verificator simbolic general și posibile diagrame lipsă în unele enunțuri. Modelele joblib salvate se încarcă în mediul verificat, dar emit avertismente de compatibilitate scikit-learn 1.9.0–1.9.1. Versiunile dependențelor nu sunt fixate exact, deci reproducerea artefactelor serializate între medii nu este garantată.

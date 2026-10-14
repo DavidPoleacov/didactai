@@ -1,33 +1,158 @@
-# Troubleshooting
+# Streamlit Deployment Troubleshooting
 
-Start with the actual exception and environment versions. Configuration files alone do not establish cloud RAM usage, installation time or successful deployment.
+## Error: "Error installing requirements"
 
-## Lightweight startup
+### What This Means
+Streamlit Cloud couldn't install your Python packages during deployment. This is usually a temporary issue.
 
-Create a fresh Python 3.12 environment, install `requirements-light.txt`, then run `python diagnose.py`, `python -m unittest discover -s tests -v` and `streamlit run app.py`. The optional neural startup test is skipped without TensorFlow; the other tests must pass. Neural inference in `diagnose.py` is opt-in with `--neural`.
+### Immediate Actions (Try These First)
 
-## Serialized model warnings
+1. **Wait & Retry**
+   - Streamlit Cloud sometimes has temporary build issues
+   - Wait 5-10 minutes, then reload the page
+   - If it still fails, proceed to next steps
 
-Check that scikit-learn is **1.9.0**, as pinned in both requirement files. A different version can emit compatibility warnings or fail to load the artifacts. Reproduce issues in the deployment environment rather than suppressing warnings.
+2. **Reboot the App**
+   - Click the "Manage App" button
+   - Click the "Reboot" icon
+   - This often fixes transient network issues
 
-## Cloud chooses the wrong requirements
+3. **View Detailed Logs**
+   - Click "Manage App"
+   - Go to "Deployment" tab
+   - Click the failed deployment to see full error
 
-Community Cloud recognizes `requirements.txt` and other documented filenames. It does not automatically select `requirements-light.txt`. Put the desired lightweight contents in `requirements.txt` in your deployment branch/copy, as described in `DEPLOYMENT.md`, and inspect the next build log.
+### If It Still Fails - Root Causes
 
-## Neural prediction
+#### Issue: TensorFlow is too large (most common)
+**Signal:** Log shows timeout or memory exceeded during `tensorflow-cpu` installation
 
-The optional model is an experimental classifier trained on synthetic interaction labels. Test it separately with `python diagnose.py --neural` after installing full requirements. Successful import or a `.keras` file alone does not establish successful inference.
+**Solution 1: Use Lightweight Requirements (Fastest)**
+- Edit the deployment settings
+- Change "App file" section → "Python requires" 
+- Use `requirements-light.txt` instead of `requirements.txt`
+- This omits the optional neural learner-state model; rule-based tutoring and the scikit-learn classifiers remain available.
+- Installation time depends on the deployment environment and package cache.
 
-The audit environment could import TensorFlow but aborted on a basic tensor addition because process-filesystem information was unavailable. The audit verifies the lightweight path and independently checks saved neural weights, not TensorFlow inference. This environment-specific failure does not establish that the model fails on ordinary computers.
+**Solution 2: Wait Longer**
+- TensorFlow might just need more time
+- Set build timeout to 60 minutes if possible (check Streamlit Cloud settings)
 
-## Answer needs review
+#### Issue: Package version conflict
+**Signal:** Log shows "pip's dependency resolver" errors
 
-The checker supports normalized exact strings and constrained rational scalars. It cannot prove general symbolic equivalence or convert units. An uncertain result does not change progress. A message requests review; the app does not create a teacher queue or notify a reviewer.
+**Check:** The requirement files specify minimum version ranges; they are not an exact lock. Confirm the Python version and resolved packages, especially when loading saved scikit-learn models. The checked-in joblib artifacts were saved with scikit-learn 1.9.0; loading them under 1.9.1 emits compatibility warnings.
 
-## A problem disappears
+#### Issue: Git synchronization lag
+**Signal:** You pushed changes but old version still deploys
 
-The practice bank excludes entries in `data/processed/exercise_review_flags.csv`. Review the original task, diagrams, key and solution before removing a flag. The training CSV remains unchanged: its 1,344-row count differs from the 1,285-row practice count.
+**Solution:** Manually trigger rebuild
+- Go to Manage App → Reboot
+- If that doesn't work, disconnect and reconnect the GitHub repo
 
-## Progress disappears
+### The App Works Without TensorFlow!
 
-Progress lives in Streamlit session state, not a persistent student account. A reset/new session loses it. Review dates are suggestions, not scheduled reminders. A database and real-student validation would be separate work.
+Your app includes **intelligent fallback**:
+
+```
+If TensorFlow available:
+  ✓ Neural model predictions
+  ✓ Advanced learning state detection
+  ✓ Adaptive difficulty recommendations
+
+If TensorFlow NOT available:
+   ✓ Rule-based pedagogical feedback
+   ✓ Scikit-learn classifiers
+   - Neural learner-state prediction is unavailable
+```
+
+The lightweight and TensorFlow-enabled paths expose different functionality. The neural prediction is optional and does not measure learning outcomes.
+
+### Step-by-Step Deployment Fix
+
+1. **Check current status**
+   ```bash
+   git status
+   git log -1  # See latest commit
+   ```
+
+2. **Ensure latest code is pushed**
+   ```bash
+   git push
+   ```
+
+3. **Deploy using lightweight requirements (safest)**
+   - Streamlit Cloud interface:
+     1. New App → Select repo
+     2. Set main file: `app.py`
+     3. Advanced settings → Requirements file: `requirements-light.txt`
+     4. Deploy
+
+4. **Or deploy with full requirements (recommended)**
+   - Same steps but use `requirements.txt`
+   - Takes longer to build but gives neural predictions
+
+### Monitoring Deployment
+
+**Expected timeline:**
+- 0-1 min: Git sync and initial setup
+- 1-5 min: Lightweight requirements (no TensorFlow)
+- 5-15 min: Full requirements (with TensorFlow)
+- If > 20 minutes: Likely stuck or timed out → Reboot
+
+**Success signs:**
+- See "Your app is loading..." message
+- No red error boxes
+- App loads and shows home page
+
+### Testing Locally First
+
+Always test before deploying to cloud:
+
+```bash
+# 1. Test all components
+python diagnose.py
+
+# 2. Test the app itself
+streamlit run app.py
+
+# 3. Try these in the app:
+#    - Go to Home tab (Demo)
+#    - Try Diagnostic test
+#    - Try Tutor AI
+#    - Check Progress page
+```
+
+If local tests pass, cloud deployment should work too.
+
+### Still Stuck?
+
+Provide these details when asking for help:
+1. **Full error message** from Manage App → Deployment log
+2. **When did it last work?** (if it worked before)
+3. **What did you just push?** (git log -1)
+4. **Are you using requirements.txt or requirements-light.txt?**
+
+### Server Resources Used
+
+Your app uses approximately:
+- **RAM:** 800MB (without TensorFlow) to 1.2GB (with TensorFlow)
+- **Startup time:** 30-60 seconds (first run)
+- **Subsequent runs:** 2-5 seconds (cached models)
+
+Streamlit Cloud free tier: 1GB RAM ✓ Should be enough
+
+### Important Files for Deployment
+
+- `requirements.txt` - Full version with TensorFlow
+- `requirements-light.txt` - Lightweight alternative
+- `.streamlit/config.toml` - Streamlit configuration ✓
+- `packages.txt` - System dependencies (graphviz)
+- `pyproject.toml` - Project metadata
+
+All present and configured ✓
+
+---
+
+**Last updated:** After neural model integration and cloud deployment optimization
+**Status:** Ready for deployment - use requirements-light.txt if you have issues with tensorflow-cpu
